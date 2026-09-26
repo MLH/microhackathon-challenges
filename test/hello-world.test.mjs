@@ -44,9 +44,19 @@ test('package exposes the two-step terminal contract and a portable skill', asyn
   assert.deepEqual(manifest.vault_services, ['gemini']);
   assert.equal(manifest.points, 50);
   assert.deepEqual(manifest.steps.map((step) => step.id), ['greet', 'hello-file']);
+  const kebabCase = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  assert.match(manifest.id, kebabCase);
+  assert.ok(manifest.title.length <= 40);
+  assert.ok(manifest.tagline.length <= 80);
+  assert.ok(manifest.steps.length >= 2 && manifest.steps.length <= 6);
+  assert.equal(new Set(manifest.steps.map((step) => step.id)).size, manifest.steps.length);
   for (const step of manifest.steps) {
     assert.ok(step.title && step.hint && step.done_when);
+    assert.match(step.id, kebabCase);
+    assert.ok(step.title.length <= 40);
+    assert.ok(step.hint.length <= 120);
   }
+  assert.match(manifest.steps[1].done_when, /no trailing newline/);
   assert.ok((await readFile(join(challenge, manifest.intro), 'utf8')).length > 0);
   assert.equal(plugin.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
   assert.equal(plugin.name, 'hello-world');
@@ -61,11 +71,12 @@ test('setup seeds the supplied workspace and cleanup is repeatable without delet
   await runHook('setup', cwd, workspace);
   assert.match(await readFile(join(workspace, 'welcome.txt'), 'utf8'), /hello/i);
   await readFile(join(workspace, '.hello-world-state'), 'utf8');
-  await writeFile(join(workspace, 'hello.txt'), 'Hello, world!\n');
+  await writeFile(join(workspace, 'hello.txt'), 'Hello, world!');
 
   await runHook('cleanup', cwd, workspace);
   await runHook('cleanup', cwd, workspace);
   assert.deepEqual((await readdir(workspace)).sort(), ['hello.txt', 'welcome.txt']);
+  assert.equal(await readFile(join(workspace, 'hello.txt'), 'utf8'), 'Hello, world!');
 });
 
 test('hooks use the current directory in standalone Pi and tolerate partial setup', async (t) => {
@@ -78,7 +89,7 @@ test('hooks use the current directory in standalone Pi and tolerate partial setu
   assert.deepEqual(await readdir(workspace), ['welcome.txt']);
 });
 
-test('setup fails clearly when the selected workspace does not exist', async (t) => {
+test('setup fails when the workspace is missing but cleanup succeeds', async (t) => {
   const cwd = await makeWorkspace(t);
   const missing = join(cwd, 'not-created');
 
@@ -87,9 +98,5 @@ test('setup fails clearly when the selected workspace does not exist', async (t)
     assert.match(error.stderr, /workspace/i);
     return true;
   });
-  await assert.rejects(runHook('cleanup', cwd, missing), (error) => {
-    assert.notEqual(error.code, 0);
-    assert.match(error.stderr, /workspace/i);
-    return true;
-  });
+  await runHook('cleanup', cwd, missing);
 });

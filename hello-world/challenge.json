@@ -8,7 +8,7 @@
   "vault_services": ["gemini"],
   "points": 50,
   "estimated_minutes": 5,
-  "learning_objectives": ["Use an AI agent to inspect and create a file"],
+  "learning_objectives": ["AI-assisted file creation"],
   "featured_tech": ["Pi", "Gemini"],
   "intro": "intro.md",
   "steps": [
@@ -22,7 +22,7 @@
       "id": "hello-file",
       "title": "Make your first file",
       "hint": "Ask Pi to create hello.txt with the words Hello, world!",
-      "done_when": "hello.txt exists in the workspace and contains exactly Hello, world!"
+      "done_when": "hello.txt exists in the workspace and contains exactly Hello, world! with no trailing newline."
     }
   ]
 }
