@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
+if [ ! -d "$workspace" ] || [ ! -w "$workspace" ]; then
+  echo "hello-world cleanup: workspace is missing or not writable: $workspace" >&2
+  exit 1
+fi
+
+rm -f -- "$workspace/.hello-world-state"
