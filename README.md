@@ -78,3 +78,50 @@ throwaway test station and an explicitly approved live model run to check:
    this package's offline tests.
 
 No boothstrap reset behavior has been verified by this repository yet.
+
+## Local Vibe Coding
+
+[`local-vibe-coding/`](local-vibe-coding/) turns a four-blank Mad Libs prompt
+into a small web app. Make up the Theme, Subject, Audience, and Style yourself,
+or roll physical d6/d6/d20/d20 dice and look up the results in the
+[`dice sheet`](local-vibe-coding/dice-sheet.md). The sheet uses Vibecannon's
+existing four tables; rolling is entirely optional. Pi creates one
+self-contained `index.html`, you try it at a localhost URL, then ask for one
+improvement and try again. Nothing is published.
+
+### Run standalone
+
+Install Pi and configure access to `google/gemini-3.8-flash`. From the repo
+root, with an interactive terminal:
+
+```sh
+./local-vibe-coding/run
+```
+
+The launcher prints the workspace and preview URL and starts the guide
+automatically. After Pi's welcome, a four-field form opens: Tab/Shift+Tab
+move between fields, Enter advances to Build, and Build sends the previewed
+prompt. Esc returns to chat without sending; `/mad-libs` reopens the form.
+You can also type the complete sentence in Pi's ordinary editor. Open the
+preview URL in a browser yourself. On exit the launcher stops only its own
+preview and keeps the app and saved Pi conversation in the printed scratch
+root. It does **not** delete that folder;
+inspect it and remove it yourself when appropriate. This is a manual,
+potentially billable Pi run. Your submitted idea goes to the configured model;
+the app and conversation stay in local scratch storage. `node --test` and the
+syntax checks below never invoke a model.
+
+Plain Pi has your normal filesystem and shell permissions. Run this only as a
+supervised development activity on a machine you trust, not as an unattended
+public kiosk. Do not enter secrets into the prompt. The boothstrap sidecar,
+portal, scoring, and station reset are not integrated yet.
+
+```sh
+node --test
+sh -n hello-world/setup hello-world/cleanup \
+  local-vibe-coding/setup local-vibe-coding/cleanup
+bash -n local-vibe-coding/run
+node --check local-vibe-coding/preview.mjs
+node --check local-vibe-coding/mad-libs.mjs
+node --check local-vibe-coding/prompt-flow.mjs
+```

@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "local-vibe-coding",
+  "version": "1.0.0",
+  "description": "Build and improve a self-contained web app with Pi on localhost"
+}

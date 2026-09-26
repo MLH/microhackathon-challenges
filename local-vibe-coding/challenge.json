@@ -1,0 +1,34 @@
+{
+  "id": "local-vibe-coding",
+  "title": "Local Vibe Coding",
+  "tagline": "Make a web app from a Mad Libs prompt.",
+  "type": "terminal",
+  "agent": "pi",
+  "model": "google/gemini-3.8-flash",
+  "vault_services": ["gemini"],
+  "points": 100,
+  "estimated_minutes": 10,
+  "learning_objectives": ["Prompt an AI agent to build and improve an interactive local web app"],
+  "featured_tech": ["Pi", "Gemini", "HTML"],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "fill-prompt",
+      "title": "Fill in your prompt",
+      "hint": "Invent four answers or roll dice and use the options sheet, then send your sentence.",
+      "done_when": "The participant sent a prompt with a kind of app, topic, audience, and visual style instead of literal blanks."
+    },
+    {
+      "id": "build-app",
+      "title": "Build and try your app",
+      "hint": "Ask Pi to make your app, open the local URL, and try its interaction.",
+      "done_when": "index.html contains a self-contained interactive app served at localhost, and the participant confirms they tried its interaction."
+    },
+    {
+      "id": "improve-app",
+      "title": "Make it yours",
+      "hint": "Ask Pi for one change, then try the updated app.",
+      "done_when": "Pi made a participant-requested change to index.html and the participant confirms they tried the updated app."
+    }
+  ]
+}

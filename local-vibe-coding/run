@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+# Standalone Pi session. Leave the app and conversation behind for inspection.
+set -euo pipefail
+
+package_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+command -v node >/dev/null 2>&1 || { echo 'local-vibe-coding: node is required' >&2; exit 1; }
+command -v pi >/dev/null 2>&1 || { echo 'local-vibe-coding: pi is required' >&2; exit 1; }
+
+scratch_base="${TMPDIR:-/tmp/opencode}"
+[ -d "$scratch_base" ] || scratch_base=/tmp
+root="$(mktemp -d "$scratch_base/local-vibe.XXXXXXXX")"
+workspace="$root/workspace"
+mkdir -p "$workspace" "$root/pi-sessions"
+echo "Workspace: $workspace"
+echo "Pi history: $root/pi-sessions"
+
+preview_pid=''
+finish() {
+  status=$?
+  trap - EXIT
+  if [ -n "$preview_pid" ]; then
+    for running in $(jobs -pr); do
+      if [ "$running" = "$preview_pid" ]; then
+        kill "$preview_pid" 2>/dev/null || true
+      fi
+    done
+    wait "$preview_pid" 2>/dev/null || true
+  fi
+  BOOTHSTRAP_WORKSPACE="$workspace" "$package_dir/cleanup" ||
+    echo "local-vibe-coding: cleanup failed in $workspace" >&2
+  echo "Saved workspace and Pi history in $root"
+  exit "$status"
+}
+trap finish EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+BOOTHSTRAP_WORKSPACE="$workspace" "$package_dir/setup"
+node "$package_dir/preview.mjs" "$workspace" "$workspace/.local-vibe-url" > "$root/preview.log" 2>&1 &
+preview_pid=$!
+
+ready=0
+for _ in {1..100}; do
+  if [ -f "$workspace/.local-vibe-url" ]; then
+    url="$(cat "$workspace/.local-vibe-url")"
+    if node -e 'fetch(process.argv[1]).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))' "$url"; then
+      ready=1
+      break
+    fi
+  fi
+  if ! kill -0 "$preview_pid" 2>/dev/null; then break; fi
+  sleep 0.05
+done
+if [ "$ready" != 1 ]; then
+  echo "local-vibe-coding: preview failed to start; see $root/preview.log" >&2
+  exit 1
+fi
+
+model="$(node -e 'console.log(JSON.parse(require("node:fs").readFileSync(process.argv[1], "utf8")).model)' "$package_dir/challenge.json")"
+echo "Preview: $url"
+echo 'Open this URL in your browser and follow Pi’s prompt.'
+cd "$workspace"
+pi --model "$model" \
+  --skill "$package_dir/skills/local-vibe-coding/SKILL.md" \
+  --extension "$package_dir/mad-libs.mjs" \
+  --session-dir "$root/pi-sessions" \
+  '/skill:local-vibe-coding'

@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
+if [ ! -d "$workspace" ] || [ ! -w "$workspace" ]; then
+  echo "local-vibe-coding setup: workspace is missing or not writable: $workspace" >&2
+  exit 1
+fi
+
+: > "$workspace/.local-vibe-state"
