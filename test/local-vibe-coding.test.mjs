@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { createHmac, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { existsSync } from 'node:fs';
 import { chmod, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
-import { get } from 'node:http';
+import { createServer, get } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
@@ -12,8 +13,7 @@ import { fileURLToPath } from 'node:url';
 const packageDir = fileURLToPath(new URL('../local-vibe-coding/', import.meta.url));
 
 async function scratch(t) {
-  const base = existsSync('/tmp/opencode') ? '/tmp/opencode' : tmpdir();
-  const root = await mkdtemp(join(base, 'vibe-test-'));
+  const root = await mkdtemp(join(tmpdir(), 'vibe-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   return root;
 }
@@ -28,28 +28,55 @@ async function run(file, args, options = {}) {
   return { code, signal, stdout, stderr };
 }
 
-async function waitForReady(path, child) {
+async function freePort() {
+  const server = createServer();
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = server.address().port;
+  await new Promise((resolve) => server.close(resolve));
+  return port;
+}
+
+async function waitForReady(url, token, child) {
   for (let i = 0; i < 100; i++) {
-    if (existsSync(path)) return (await readFile(path, 'utf8')).trim();
+    try {
+      if (await ownsPreview(url, token)) return;
+    } catch { /* not listening yet */ }
     if (child.exitCode !== null) throw new Error(`preview exited ${child.exitCode}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error('preview did not become ready');
 }
 
+async function ownsPreview(url, token) {
+  const nonce = randomBytes(16).toString('hex');
+  const result = await fetch(`${url}__status`, { headers: { 'x-local-vibe-nonce': nonce } });
+  return result.status === 204 && result.headers.get('x-local-vibe-proof') === createHmac('sha256', token).update(nonce).digest('hex');
+}
+
+async function stopPreview(workspace, port) {
+  const token = (await readFile(join(workspace, '.local-vibe-state'), 'utf8')).trim();
+  await fetch(`http://127.0.0.1:${port}/__stop`, { method: 'POST', headers: { 'x-local-vibe-token': token } });
+}
+
 test('portable package offers a three-step local-only Pi challenge and a complete dice reference', async () => {
   const manifest = JSON.parse(await readFile(join(packageDir, 'challenge.json'), 'utf8'));
   const plugin = JSON.parse(await readFile(join(packageDir, 'plugin.json'), 'utf8'));
-  const skill = await readFile(join(packageDir, 'skills/local-vibe-coding/SKILL.md'), 'utf8');
+  const skill = await readFile(join(packageDir, 'skills/start-challenge/SKILL.md'), 'utf8');
+  const monitor = await readFile(join(packageDir, manifest.browser.monitor_skill), 'utf8');
   const sheet = await readFile(join(packageDir, 'dice-sheet.md'), 'utf8');
   assert.equal(manifest.id, 'local-vibe-coding');
-  assert.equal(manifest.type, 'terminal');
+  assert.equal(manifest.type, 'browser');
+  assert.equal(manifest.browser.start_url, 'http://127.0.0.1:4321/');
   assert.equal(manifest.agent, 'pi');
   assert.equal(manifest.model, 'google/gemini-3.8-flash');
   assert.deepEqual(manifest.vault_services, ['gemini']);
   assert.deepEqual(manifest.steps.map((step) => step.id), ['fill-prompt', 'build-app', 'improve-app']);
   assert.equal(plugin.name, manifest.id);
-  assert.match(skill, /^---\nname: local-vibe-coding\ndescription: .+\n---\n/);
+  assert.equal((await readFile(join(packageDir, 'package.json'), 'utf8')).includes('"0.87.1"'), true);
+  assert.ok((await readFile(join(packageDir, 'package-lock.json'), 'utf8')).includes('pi-tui'));
+  assert.match(skill, /^---\nname: start-challenge\ndescription: .+\n---\n/);
+  assert.match(monitor, /never report|do not report/i);
   assert.match(skill, /report_step/);
   assert.match(skill, /confirm/i);
   for (const [heading, size] of [['Theme', 6], ['Subject', 6], ['Audience', 20], ['Style', 20]]) {
@@ -67,16 +94,155 @@ test('hooks preserve participant work and tolerate repeat or partial cleanup', a
   const root = await scratch(t);
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
-  const env = { ...process.env, BOOTHSTRAP_WORKSPACE: workspace };
+  const port = await freePort();
+  const env = { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), BOOTHSTRAP_WORKSPACE: workspace };
+  t.after(async () => {
+    if (existsSync(join(workspace, '.local-vibe-state'))) await stopPreview(workspace, port).catch(() => {});
+  });
   assert.equal((await run(join(packageDir, 'cleanup'), [], { cwd: root, env })).code, 0);
   assert.equal((await run(join(packageDir, 'setup'), [], { cwd: root, env })).code, 0);
+  const token = await readFile(join(workspace, '.local-vibe-state'), 'utf8');
+  const sheet = await readFile(join(workspace, 'dice-sheet.md'), 'utf8');
+  assert.match(sheet, /Neon Noir/);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/`)).status, 200);
   await writeFile(join(workspace, 'index.html'), '<p>My app</p>');
+  await writeFile(join(workspace, 'dice-sheet.md'), 'participant annotations');
   assert.equal((await run(join(packageDir, 'setup'), [], { cwd: root, env })).code, 0);
+  assert.equal(await readFile(join(workspace, '.local-vibe-state'), 'utf8'), token);
+  assert.equal(await readFile(join(workspace, 'dice-sheet.md'), 'utf8'), 'participant annotations');
   assert.equal(await readFile(join(workspace, 'index.html'), 'utf8'), '<p>My app</p>');
-  await writeFile(join(workspace, '.local-vibe-url'), 'http://127.0.0.1:1234/\n');
+  await stopPreview(workspace, port);
   assert.equal((await run(join(packageDir, 'cleanup'), [], { cwd: root, env })).code, 0);
   assert.equal((await run(join(packageDir, 'cleanup'), [], { cwd: root, env })).code, 0);
-  assert.deepEqual(await readdir(workspace), ['index.html']);
+  const retained = await readdir(workspace);
+  assert.deepEqual(retained.filter((name) => !name.startsWith('.local-vibe-preview-')).sort(), ['dice-sheet.md', 'index.html']);
+  assert.equal(retained.filter((name) => name.startsWith('.local-vibe-preview-')).length, 1);
+  assert.equal((await run(join(packageDir, 'cleanup'), [], { cwd: root, env: { ...env, BOOTHSTRAP_WORKSPACE: join(root, 'missing') } })).code, 0);
+});
+
+test('setup does not follow disposable-state or log symlinks out of the workspace', async (t) => {
+  const root = await scratch(t);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const outsideState = join(root, 'outside-state.txt');
+  const outsideLog = join(root, 'outside-log.txt');
+  await writeFile(outsideState, 'untouched state');
+  await writeFile(outsideLog, 'untouched log');
+  await symlink(outsideState, join(workspace, '.local-vibe-state'));
+  await symlink(outsideLog, join(workspace, '.local-vibe-preview.log'));
+  const port = await freePort();
+  const env = { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), BOOTHSTRAP_WORKSPACE: workspace };
+  t.after(async () => {
+    if (existsSync(join(workspace, '.local-vibe-state'))) await stopPreview(workspace, port).catch(() => {});
+  });
+  const result = await run(join(packageDir, 'setup'), [], { cwd: root, env });
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(await readFile(outsideState, 'utf8'), 'untouched state');
+  assert.equal(await readFile(outsideLog, 'utf8'), 'untouched log');
+  await stopPreview(workspace, port);
+});
+
+test('setup refuses a foreign listener and recovers only stale state', async (t) => {
+  const root = await scratch(t);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const port = await freePort();
+  const env = { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), BOOTHSTRAP_WORKSPACE: workspace };
+  const listener = createServer((req, res) => req.url === '/__status'
+    ? res.writeHead(204).end()
+    : res.writeHead(200).end('foreign'));
+  listener.listen(port, '127.0.0.1');
+  await once(listener, 'listening');
+  t.after(() => new Promise((resolve) => listener.close(resolve)));
+  await writeFile(join(workspace, '.local-vibe-state'), 'stale-token\n');
+  const failed = await run(join(packageDir, 'setup'), [], { cwd: root, env });
+  assert.notEqual(failed.code, 0);
+  assert.match(failed.stderr, /preview failed to start/);
+  assert.equal(await (await fetch(`http://127.0.0.1:${port}/`)).text(), 'foreign');
+  await new Promise((resolve) => listener.close(resolve));
+  const started = await run(join(packageDir, 'setup'), [], { cwd: root, env });
+  assert.equal(started.code, 0, started.stderr);
+  assert.notEqual((await readFile(join(workspace, '.local-vibe-state'), 'utf8')).trim(), 'stale-token');
+  await stopPreview(workspace, port);
+  await run(join(packageDir, 'cleanup'), [], { cwd: root, env });
+});
+
+test('overlapping setup calls leave an owned and stoppable preview', async (t) => {
+  const root = await scratch(t);
+  const workspace = join(root, 'workspace');
+  await mkdir(workspace);
+  const port = await freePort();
+  const env = { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), BOOTHSTRAP_WORKSPACE: workspace };
+  t.after(async () => {
+    if (existsSync(join(workspace, '.local-vibe-state'))) await stopPreview(workspace, port).catch(() => {});
+  });
+  const results = await Promise.all([run(join(packageDir, 'setup'), [], { cwd: root, env }), run(join(packageDir, 'setup'), [], { cwd: root, env })]);
+  assert.ok(results.every((result) => result.code === 0), JSON.stringify(results));
+  const token = (await readFile(join(workspace, '.local-vibe-state'), 'utf8')).trim();
+  assert.equal(await ownsPreview(`http://127.0.0.1:${port}/`, token), true);
+  await stopPreview(workspace, port);
+  await run(join(packageDir, 'cleanup'), [], { cwd: root, env });
+});
+
+test('losing setup waits for a delayed winning ownership marker', async (t) => {
+  const workspace = await scratch(t);
+  const port = await freePort();
+  const token = randomBytes(32).toString('hex');
+  const url = `http://127.0.0.1:${port}/`;
+  const env = { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), BOOTHSTRAP_WORKSPACE: workspace };
+  const winner = spawn(process.execPath, [join(packageDir, 'preview.mjs'), workspace], {
+    stdio: ['ignore', 'pipe', 'pipe'], env: { ...env, LOCAL_VIBE_TOKEN: token },
+  });
+  t.after(async () => {
+    if (winner.exitCode === null) winner.kill('SIGTERM');
+    if (winner.exitCode === null) await once(winner, 'exit');
+  });
+  await waitForReady(url, token, winner);
+  const loser = spawn(join(packageDir, 'setup'), [], { cwd: workspace, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const loserExit = once(loser, 'exit');
+  t.after(() => { if (loser.exitCode === null) loser.kill('SIGTERM'); });
+  const firstMiss = new Promise((resolve) => {
+    loser.stderr.on('data', (chunk) => {
+      if (chunk.toString().includes('waiting briefly for another setup')) resolve();
+    });
+  });
+  let timer;
+  try {
+    await Promise.race([firstMiss, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('loser did not reach the ownership retry')), 3000); })]);
+  } finally { clearTimeout(timer); }
+  await writeFile(join(workspace, '.local-vibe-state'), token + '\n');
+  const [code] = await loserExit;
+  assert.equal(code, 0);
+  assert.equal(await ownsPreview(url, token), true);
+  await stopPreview(workspace, port);
+  await run(join(packageDir, 'cleanup'), [], { cwd: workspace, env });
+});
+
+test('interrupting setup after spawn stops only its own unfinished preview', async (t) => {
+  const root = await scratch(t);
+  const workspace = join(root, 'workspace');
+  const bin = join(root, 'bin');
+  await mkdir(workspace);
+  await mkdir(bin);
+  const node = join(bin, 'node');
+  await writeFile(node, `#!/bin/sh\ncase "$1" in */preview.mjs) echo $$ > "$BOOTHSTRAP_WORKSPACE/preview-pid"; exec sleep 30;; esac\nexec "${process.execPath}" "$@"\n`);
+  await chmod(node, 0o755);
+  const port = await freePort();
+  const env = { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), BOOTHSTRAP_WORKSPACE: workspace, PATH: `${bin}:${process.env.PATH}` };
+  const child = spawn(join(packageDir, 'setup'), [], { cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const childExit = once(child, 'exit');
+  t.after(() => { if (child.exitCode === null) child.kill('SIGTERM'); });
+  let pid;
+  for (let i = 0; i < 100; i++) {
+    try { pid = Number(await readFile(join(workspace, 'preview-pid'), 'utf8')); break; }
+    catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
+  }
+  assert.ok(pid, 'preview child started');
+  child.kill('SIGTERM');
+  const [code] = await childExit;
+  assert.notEqual(code, 0);
+  assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  assert.ok(!existsSync(join(workspace, '.local-vibe-state')));
 });
 
 test('Pi form opens after one successful welcome, navigates fields, previews and sends once', async () => {
@@ -275,16 +441,21 @@ test('failed Pi preflight leaves the form reopenable with all answers', async ()
 
 test('localhost preview serves only the HTML app and reloads while preserving the source file', async (t) => {
   const root = await scratch(t);
-  const ready = join(root, '.local-vibe-url');
-  const child = spawn(process.execPath, [join(packageDir, 'preview.mjs'), root, ready], {
+  const port = await freePort();
+  const token = 'a-test-only-secret';
+  const url = `http://127.0.0.1:${port}/`;
+  const child = spawn(process.execPath, [join(packageDir, 'preview.mjs'), root], {
     stdio: ['ignore', 'pipe', 'pipe'],
+    env: { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), LOCAL_VIBE_TOKEN: token },
   });
   t.after(async () => {
     if (child.exitCode === null) child.kill('SIGTERM');
     if (child.exitCode === null) await once(child, 'exit');
   });
-  const url = await waitForReady(ready, child);
-  assert.match(url, /^http:\/\/127\.0\.0\.1:\d+\/$/);
+  await waitForReady(url, token, child);
+  assert.equal((await fetch(url + '__status')).status, 403);
+  assert.equal((await fetch(url + '__stop', { method: 'POST', headers: { 'x-local-vibe-token': 'bad' } })).status, 403);
+  assert.equal((await fetch(url + '__stop', { method: 'POST', headers: { 'x-local-vibe-token': token, Origin: 'https://attacker.example' } })).status, 403);
   const waiting = await fetch(url);
   assert.equal(waiting.status, 200);
   assert.match(await waiting.text(), /Waiting for index\.html/);
@@ -304,7 +475,7 @@ test('localhost preview serves only the HTML app and reloads while preserving th
   assert.match(response.headers.get('content-security-policy'), /connect-src 'self'/);
   assert.match(await response.text(), /EventSource/);
   assert.equal(await readFile(join(root, 'index.html'), 'utf8'), app);
-  for (const path of ['secret.txt', '%2e%2e/secret.txt', '.local-vibe-url', 'index.html/../secret.txt']) {
+  for (const path of ['secret.txt', '%2e%2e/secret.txt', '.local-vibe-state', 'dice-sheet.md', 'index.html/../secret.txt']) {
     const forbidden = await fetch(url + path);
     assert.notEqual(forbidden.status, 200, path);
   }
@@ -348,12 +519,29 @@ test('standalone launcher primes Pi and stops its preview without deleting app o
   assert.match(args, /--skill\n.*SKILL\.md/);
   assert.match(args, /--extension\n.*mad-libs\.mjs/);
   assert.match(args, /--session-dir\n/);
-  assert.match(args, /\/skill:local-vibe-coding/);
+  assert.match(args, /\/skill:start-challenge/);
   assert.equal(await readFile(join(dirname(workspace), 'pi-sessions/conversation.jsonl'), 'utf8'), 'saved');
-  assert.ok(!existsSync(join(workspace, '.local-vibe-url')));
-  const previewUrl = result.stdout.match(/Preview: (http:\/\/127\.0\.0\.1:\d+\/)/)?.[1];
+  assert.ok(!existsSync(join(workspace, '.local-vibe-state')));
+  const previewUrl = result.stdout.match(/Preview: (http:\/\/127\.0\.0\.1:4321\/)/)?.[1];
   assert.ok(previewUrl, result.stdout);
   await assert.rejects(fetch(previewUrl), 'the launcher must stop its preview on exit');
+});
+
+test('standalone test-port override stops the preview it started', async (t) => {
+  const parent = await scratch(t);
+  const bin = join(parent, 'bin');
+  await mkdir(bin);
+  await symlink(process.execPath, join(bin, 'node'));
+  await writeFile(join(bin, 'pi'), '#!/bin/sh\n: > index.html\n');
+  await chmod(join(bin, 'pi'), 0o755);
+  const port = await freePort();
+  const result = await run(join(packageDir, 'run'), [], {
+    cwd: parent,
+    env: { ...process.env, NODE_ENV: 'test', LOCAL_VIBE_TEST_PORT: String(port), TMPDIR: parent, PATH: `${bin}:/usr/bin:/bin` },
+  });
+  assert.equal(result.code, 0, result.stderr);
+  assert.match(result.stdout, new RegExp(`Preview: http://127\\.0\\.0\\.1:${port}/`));
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/`));
 });
 
 test('launcher rejects missing Pi before creating a workspace or starting a preview', async (t) => {
@@ -388,5 +576,5 @@ test('launcher aborts before Pi when preview startup fails', async (t) => {
   const workspace = result.stdout.match(/Workspace: (.+\/workspace)/)?.[1];
   assert.ok(workspace);
   assert.ok(!existsSync(join(workspace, 'pi-was-called')));
-  assert.ok(!existsSync(join(workspace, '.local-vibe-url')));
+  assert.ok(!existsSync(join(workspace, '.local-vibe-state')));
 });

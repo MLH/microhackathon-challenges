@@ -1,10 +1,74 @@
 #!/bin/sh
 set -eu
 
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
 if [ ! -d "$workspace" ] || [ ! -w "$workspace" ]; then
   echo "local-vibe-coding setup: workspace is missing or not writable: $workspace" >&2
   exit 1
 fi
+command -v node >/dev/null 2>&1 || { echo 'local-vibe-coding setup: node is required' >&2; exit 1; }
 
-: > "$workspace/.local-vibe-state"
+port=4321
+if [ "${NODE_ENV:-}" = test ] && [ -n "${LOCAL_VIBE_TEST_PORT:-}" ]; then
+  port=$LOCAL_VIBE_TEST_PORT
+fi
+url="http://127.0.0.1:$port"
+state="$workspace/.local-vibe-state"
+health() {
+  node "$package_dir/control.mjs" status "$url" "$1"
+}
+
+if old_token=$(node "$package_dir/control.mjs" read-state "$state"); then
+  if health "$old_token"; then exit 0; fi
+fi
+
+umask 077
+if [ ! -e "$workspace/dice-sheet.md" ]; then
+  cp -- "$package_dir/dice-sheet.md" "$workspace/dice-sheet.md"
+fi
+token=$(node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')
+log="$workspace/.local-vibe-preview-$(node -e 'process.stdout.write(require("node:crypto").randomBytes(16).toString("hex"))').log"
+# A background child inherits the caller's process group. Do not daemonize:
+# boothstrap must launch setup in the challenge group it tears down on reset.
+LOCAL_VIBE_TOKEN="$token" node "$package_dir/preview.mjs" "$workspace" > "$log" 2>&1 &
+child=$!
+started=0
+finish() {
+  if [ "$started" != 1 ]; then
+    kill "$child" 2>/dev/null || true
+    wait "$child" 2>/dev/null || true
+  fi
+}
+trap finish 0
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+attempt=0
+while [ "$attempt" -lt 40 ]; do
+  if ! kill -0 "$child" 2>/dev/null; then break; fi
+  if health "$token"; then
+    node "$package_dir/control.mjs" write-state "$state" "$token"
+    started=1
+    exit 0
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.1
+done
+attempt=0
+while [ "$attempt" -lt 20 ]; do
+  if other_token=$(node "$package_dir/control.mjs" read-state "$state"); then
+    if health "$other_token"; then
+      # A concurrent setup won the bind and published its own token. Never
+      # remove or replace another invocation's control state.
+      exit 0
+    fi
+  fi
+  if [ "$attempt" -eq 0 ]; then
+    echo 'local-vibe-coding setup: waiting briefly for another setup to publish ownership' >&2
+  fi
+  attempt=$((attempt + 1))
+  sleep 0.1
+done
+echo "local-vibe-coding setup: preview failed to start on $url; see $log" >&2
+exit 1

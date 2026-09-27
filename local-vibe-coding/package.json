@@ -1,0 +1,8 @@
+{
+  "name": "local-vibe-coding-pi-deps",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-tui": "0.87.1"
+  }
+}

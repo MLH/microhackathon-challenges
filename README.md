@@ -12,7 +12,7 @@ The author-facing contract is in
 [`hello-world/`](hello-world/) is a two-step terminal challenge: meet Pi and
 create a file containing `Hello, world!`. Its `challenge.json` is for
 boothstrap (steps, model, points); `plugin.json` identifies the portable Agent
-Plugin; `skills/hello-world/SKILL.md` guides Pi. There is no challenge-owned
+Plugin; `skills/start-challenge/SKILL.md` guides Pi. There is no challenge-owned
 `mcp.json`: boothstrap provides `report_step` and `session_info` through its
 own session MCP configuration.
 
@@ -26,7 +26,7 @@ Requires Node 26 or later and a POSIX shell; no npm install, credentials, or
 model calls are needed.
 
 ```sh
-node --test
+node --test test/hello-world.test.mjs
 sh -n hello-world/setup hello-world/cleanup
 ```
 
@@ -45,8 +45,8 @@ workspace=$(mktemp -d)
 cd "$workspace"
 "$repo/hello-world/setup"
 pi --model google/gemini-3.8-flash \
-  --skill "$repo/hello-world/skills/hello-world/SKILL.md" \
-  '/skill:hello-world'
+  --skill "$repo/hello-world/skills/start-challenge/SKILL.md" \
+  '/skill:start-challenge'
 "$repo/hello-world/cleanup"
 ```
 
@@ -63,7 +63,7 @@ throwaway test station and an explicitly approved live model run to check:
 
 1. Pin a repo ref that contains `hello-world` in the event config. Confirm the
    portal shows its intro, two steps, and 50 points, then launches and primes
-   the `hello-world` skill in Pi.
+   the `start-challenge` skill in Pi.
 2. Complete both steps. Confirm each `report_step` updates the checklist and
    Finish stays locked until both are done. Finish and confirm the cleanup
    marker is gone but `hello.txt` still exists until session reset.
@@ -95,6 +95,7 @@ Install Pi and configure access to `google/gemini-3.8-flash`. From the repo
 root, with an interactive terminal:
 
 ```sh
+./local-vibe-coding/install
 ./local-vibe-coding/run
 ```
 
@@ -102,10 +103,12 @@ The launcher prints the workspace and preview URL and starts the guide
 automatically. After Pi's welcome, a four-field form opens: Tab/Shift+Tab
 move between fields, Enter advances to Build, and Build sends the previewed
 prompt. Esc returns to chat without sending; `/mad-libs` reopens the form.
-You can also type the complete sentence in Pi's ordinary editor. Open the
-preview URL in a browser yourself. On exit the launcher stops only its own
-preview and keeps the app and saved Pi conversation in the printed scratch
-root. It does **not** delete that folder;
+You can also type the complete sentence in Pi's ordinary editor. The physical
+dice options are copied into the workspace as `dice-sheet.md`. Open the fixed
+preview URL (`http://127.0.0.1:4321/`) in a browser yourself. If that port is
+occupied, setup fails without stopping the other listener. On exit the
+launcher stops only its own preview and keeps the app and saved Pi conversation
+in the printed scratch root. It does **not** delete that folder;
 inspect it and remove it yourself when appropriate. This is a manual,
 potentially billable Pi run. Your submitted idea goes to the configured model;
 the app and conversation stay in local scratch storage. `node --test` and the
@@ -113,13 +116,14 @@ syntax checks below never invoke a model.
 
 Plain Pi has your normal filesystem and shell permissions. Run this only as a
 supervised development activity on a machine you trust, not as an unattended
-public kiosk. Do not enter secrets into the prompt. The boothstrap sidecar,
-portal, scoring, and station reset are not integrated yet.
+public kiosk. Do not enter secrets into the prompt. The package declares a
+browser challenge, but boothstrap's browser launch and Pi extension-loading
+contract are still under development; this local test is not a station trial.
 
 ```sh
 node --test
 sh -n hello-world/setup hello-world/cleanup \
-  local-vibe-coding/setup local-vibe-coding/cleanup
+  local-vibe-coding/setup local-vibe-coding/cleanup local-vibe-coding/install
 bash -n local-vibe-coding/run
 node --check local-vibe-coding/preview.mjs
 node --check local-vibe-coding/mad-libs.mjs

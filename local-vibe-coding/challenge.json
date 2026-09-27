@@ -2,13 +2,17 @@
   "id": "local-vibe-coding",
   "title": "Local Vibe Coding",
   "tagline": "Make a web app from a Mad Libs prompt.",
-  "type": "terminal",
+  "type": "browser",
+  "browser": {
+    "start_url": "http://127.0.0.1:4321/",
+    "monitor_skill": "monitor/SKILL.md"
+  },
   "agent": "pi",
   "model": "google/gemini-3.8-flash",
   "vault_services": ["gemini"],
   "points": 100,
   "estimated_minutes": 10,
-  "learning_objectives": ["Prompt an AI agent to build and improve an interactive local web app"],
+  "learning_objectives": ["prompting for web apps"],
   "featured_tech": ["Pi", "Gemini", "HTML"],
   "intro": "intro.md",
   "steps": [

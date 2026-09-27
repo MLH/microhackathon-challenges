@@ -1,5 +1,5 @@
 ---
-name: local-vibe-coding
+name: start-challenge
 description: Guide a participant through building and improving a local web app from a Mad Libs prompt. Use when starting this challenge.
 ---
 
@@ -16,7 +16,7 @@ open after your welcome: Theme (kind of app), Subject (topic), Audience, and
 Style. Tab/Shift+Tab move between fields, Enter advances to Build, Build sends
 the previewed sentence, and Esc returns to chat without sending. `/mad-libs`
 reopens the unsent form. They can invent answers or use physical dice and the
-`dice-sheet.md` in the installed package (d6, d6, d20, d20); mixing is fine.
+`dice-sheet.md` in the workspace (d6, d6, d20, d20); mixing is fine.
 You cannot roll for them and must not pretend you did. If the form is unavailable,
 they can type this complete sentence in Pi's normal editor instead:
 
@@ -27,9 +27,8 @@ Pi conversation remain in local scratch storage after exit. Ask them not to
 enter secrets. The form itself does not make a model request.
 
 Use `session_info` if available for their display name and existing step
-status. Read `.local-vibe-url` in the workspace for the **actual** localhost
-URL; never assume port 4321. The preview was started by the launcher, not by
-you. If the URL is absent or unreachable, explain the problem instead of
+status. The preview URL is `http://127.0.0.1:4321/`; it is started by setup,
+not by you. If it is unreachable, explain the problem instead of
 claiming a working app.
 
 1. After they send a sentence with all four answers, acknowledge the idea and
@@ -50,6 +49,7 @@ explain the offline limit and offer a clearly labeled local simulation. Never
 present fake data as live. If the preview or interaction fails, be honest,
 fix it, and ask for another try. Do not claim to see their browser: their
 confirmation is the evidence that they tried it. If `report_step` errors,
-say the checklist was not updated and retry rather than claiming points.
+say the checklist was not updated and retry once. If it still fails, ask
+booth staff for help rather than claiming points.
 When both app steps are confirmed, invite them to Finish in boothstrap, or
 congratulate them in standalone Pi. The app stays local; do not offer to ship.
