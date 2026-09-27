@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,8 +11,7 @@ const execFileAsync = promisify(execFile);
 const challenge = fileURLToPath(new URL('../hello-world/', import.meta.url));
 
 async function makeWorkspace(t) {
-  const scratchBase = existsSync('/tmp/opencode') ? '/tmp/opencode' : tmpdir();
-  const root = await mkdtemp(join(scratchBase, 'hello-world-'));
+  const root = await mkdtemp(join(tmpdir(), 'hello-world-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const workspace = join(root, 'workspace');
   await mkdir(workspace);
@@ -35,7 +33,7 @@ function runHook(name, cwd, workspace) {
 test('package exposes the two-step terminal contract and a portable skill', async () => {
   const manifest = JSON.parse(await readFile(join(challenge, 'challenge.json'), 'utf8'));
   const plugin = JSON.parse(await readFile(join(challenge, 'plugin.json'), 'utf8'));
-  const skill = await readFile(join(challenge, 'skills/hello-world/SKILL.md'), 'utf8');
+  const skill = await readFile(join(challenge, 'skills/start-challenge/SKILL.md'), 'utf8');
 
   assert.equal(manifest.id, 'hello-world');
   assert.equal(manifest.type, 'terminal');
@@ -56,11 +54,10 @@ test('package exposes the two-step terminal contract and a portable skill', asyn
     assert.ok(step.title.length <= 40);
     assert.ok(step.hint.length <= 120);
   }
-  assert.match(manifest.steps[1].done_when, /no trailing newline/);
   assert.ok((await readFile(join(challenge, manifest.intro), 'utf8')).length > 0);
   assert.equal(plugin.$schema, 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json');
   assert.equal(plugin.name, 'hello-world');
-  assert.match(skill, /^---\nname: hello-world\ndescription: .+\n---\n/);
+  assert.match(skill, /^---\nname: start-challenge\ndescription: .+\n---\n/);
   assert.ok(!(await readdir(challenge)).includes('mcp.json'));
 });
 

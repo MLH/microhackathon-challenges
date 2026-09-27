@@ -1,5 +1,5 @@
 ---
-name: hello-world
+name: start-challenge
 description: Guide a participant through the Hello, World! booth challenge. Use when starting or resuming this challenge.
 ---
 

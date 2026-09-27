@@ -12,7 +12,7 @@ The author-facing contract is in
 [`hello-world/`](hello-world/) is a two-step terminal challenge: meet Pi and
 create a file containing `Hello, world!`. Its `challenge.json` is for
 boothstrap (steps, model, points); `plugin.json` identifies the portable Agent
-Plugin; `skills/hello-world/SKILL.md` guides Pi. There is no challenge-owned
+Plugin; `skills/start-challenge/SKILL.md` guides Pi. There is no challenge-owned
 `mcp.json`: boothstrap provides `report_step` and `session_info` through its
 own session MCP configuration.
 
@@ -45,8 +45,8 @@ workspace=$(mktemp -d)
 cd "$workspace"
 "$repo/hello-world/setup"
 pi --model google/gemini-3.8-flash \
-  --skill "$repo/hello-world/skills/hello-world/SKILL.md" \
-  '/skill:hello-world'
+  --skill "$repo/hello-world/skills/start-challenge/SKILL.md" \
+  '/skill:start-challenge'
 "$repo/hello-world/cleanup"
 ```
 
@@ -63,7 +63,7 @@ throwaway test station and an explicitly approved live model run to check:
 
 1. Pin a repo ref that contains `hello-world` in the event config. Confirm the
    portal shows its intro, two steps, and 50 points, then launches and primes
-   the `hello-world` skill in Pi.
+   the `start-challenge` skill in Pi.
 2. Complete both steps. Confirm each `report_step` updates the checklist and
    Finish stays locked until both are done. Finish and confirm the cleanup
    marker is gone but `hello.txt` still exists until session reset.
