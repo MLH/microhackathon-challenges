@@ -244,7 +244,6 @@ function renderFlyingBird(entry) {
 
   const wrapper = document.createElement('div')
   wrapper.className = 'bird-wrapper'
-  wrapper.style.top = `${Math.random() * 65 + 8}vh`
   const durationSeconds = Number.parseFloat(animation.duration) * FLIGHT_SLOWDOWN
   wrapper.style.animation = `${animation.animation_name} ${durationSeconds}s ${animation.timing_function} infinite`
 

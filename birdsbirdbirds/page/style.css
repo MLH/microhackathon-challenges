@@ -255,6 +255,9 @@ button:disabled {
 
 .bird-wrapper {
   position: absolute;
+  /* The keyframes place the bird; translate(x, y) is measured from here. */
+  top: 0;
+  left: 0;
   display: flex;
   flex-direction: column;
   align-items: center;

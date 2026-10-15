@@ -66,11 +66,11 @@ for this bird:
 
 - `animation_name` is unique and matches the name after `@keyframes`.
 - Start at `translate(-20vw, Y)` and end at `translate(120vw, Y)`, where Y is
-  between 10vh and 90vh.
+  between 10vh and 60vh, so the bird and its name stay on screen.
 - Use at least 5 keyframe percentages (for example 0%, 20%, 50%, 80%, 100%)
   with varying heights and `rotate(...)` angles.
 - Pick a flight character that fits the bird and what the participant asked.
-- `duration` is between 2s and 60s. The sky page slows it down a little.
+- `duration` is between 2s and 60s. The sky page plays it three times slower.
 - Only `transform`, `opacity`, and `animation-timing-function` are allowed
   inside the keyframes.
 
