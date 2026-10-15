@@ -1,0 +1,10 @@
+#!/bin/sh
+# Stops the app preview setup started. Safe to run twice, after a crash, or
+# after setup failed.
+set -eu
+
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
+
+[ -d "$workspace" ] || exit 0
+exec node "$package_dir/preview.mjs" stop "$workspace"

@@ -1,0 +1,8 @@
+{
+  "name": "vibe-coding-mad-libs",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.0.4"
+  }
+}

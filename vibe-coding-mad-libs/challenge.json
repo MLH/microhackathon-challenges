@@ -1,0 +1,35 @@
+{
+  "id": "vibe-coding-mad-libs",
+  "title": "Vibe Coding Mad Libs",
+  "tagline": "Fill four blanks, and Pi builds the web app you described.",
+  "icon": "laptop",
+  "type": "terminal",
+  "agent": "pi",
+  "model": "google/gemini-3.8-flash",
+  "vault_services": ["gemini"],
+  "points": 100,
+  "estimated_minutes": 10,
+  "learning_objectives": ["prompting an agent to build a web app", "iterating on generated code"],
+  "featured_tech": ["Pi", "Gemini", "HTML"],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "fill-prompt",
+      "title": "Fill in your prompt",
+      "hint": "Fill the four blanks in the form. Invent answers, or roll dice against dice-sheet.md.",
+      "done_when": "The participant sent a prompt naming a kind of app, a subject, an audience, and a style, with no blank left unfilled."
+    },
+    {
+      "id": "build-app",
+      "title": "Build and try your app",
+      "hint": "Let Pi build it, open the preview, and try it out.",
+      "done_when": "index.html holds a working self-contained app built from the prompt, and the participant confirmed they tried it in the preview."
+    },
+    {
+      "id": "improve-app",
+      "title": "Make it yours",
+      "hint": "Ask Pi for one change, then try the updated app.",
+      "done_when": "Pi made one change the participant asked for to index.html, and the participant confirmed they tried the updated app."
+    }
+  ]
+}

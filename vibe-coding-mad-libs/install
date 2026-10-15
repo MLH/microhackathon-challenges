@@ -1,0 +1,7 @@
+#!/bin/sh
+# Installs the Pi packages the Mad Libs form extension imports, at the
+# versions boothstrap's Pi uses, into this package's node_modules.
+set -eu
+
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+npm ci --ignore-scripts --no-audit --no-fund --prefix "$package_dir"
