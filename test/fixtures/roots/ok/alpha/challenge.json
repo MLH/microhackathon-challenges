@@ -2,7 +2,7 @@
   "id": "fixture-alpha",
   "title": "Fixture fixture-alpha",
   "tagline": "Minimal valid package.",
-  "type": "terminal",
+  "type": "bogus",
   "agent": "pi",
   "model": "google/gemini-2.5-flash",
   "vault_services": ["gemini"],
