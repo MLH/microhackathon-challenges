@@ -1,5 +1,3 @@
-# Four blanks, one web app
-
 Tell Pi what to build by filling in one sentence:
 
 > Build a [Theme] about [Subject] for [Audience] in [Style] style.
