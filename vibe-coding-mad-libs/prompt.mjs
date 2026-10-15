@@ -31,16 +31,30 @@ export function findBlankField(answers) {
 }
 
 /**
- * Fills the sentence from `answers`, trimming each one. Throws naming the
- * first blank field, so a sentence with a blank never reaches the model.
+ * Fills the sentence from `answers`, trimming each one and leaving a blank
+ * answer as its bracketed blank, such as `[Style]`.
+ */
+export function fillSentence(answers) {
+  const [theme, subject, audience, style] = FIELDS.map((field) => {
+    const answer = (answers[field.key] ?? '').trim()
+
+    return isBlank(answer) ? `[${field.label}]` : answer
+  })
+  const article = /^[aeiou]/i.test(theme) ? 'an' : 'a'
+
+  return `Build ${article} ${theme} about ${subject} for ${audience} in ${style} style.`
+}
+
+/**
+ * Fills the sentence from `answers`, as {@link fillSentence} does. Throws
+ * naming the first blank field, so a sentence with a blank never reaches the
+ * model.
  */
 export function assemblePrompt(answers) {
   const blankField = findBlankField(answers)
   if (blankField) throw new Error(`${blankField.label} is blank`)
 
-  const [theme, subject, audience, style] = FIELDS.map((field) => answers[field.key].trim())
-
-  return `Build a ${theme} about ${subject} for ${audience} in ${style} style.`
+  return fillSentence(answers)
 }
 
 /** True when `text` is the whole sentence with all four blanks filled. */

@@ -29,11 +29,14 @@ const READY_TIMEOUT_MS = 10_000
 const STOP_TIMEOUT_MS = 5_000
 const POLL_INTERVAL_MS = 50
 
+/** Editors truncate then write, so reloading on the first change can show an empty page. */
+const RELOAD_DEBOUNCE_MS = 100
+
 /** Larger files are refused rather than read into memory. */
 const MAX_APP_BYTES = 2_000_000
 
-/** Blocks every request but the page's own inline code and its reload stream. */
-const CONTENT_SECURITY_POLICY = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; media-src data:; font-src data:; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
+/** Blocks every request but the page's own inline code and its reload stream. Allows eval, which generated calculators use. */
+const CONTENT_SECURITY_POLICY = "default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval'; style-src 'unsafe-inline'; img-src 'self' data:; media-src data:; font-src data:; connect-src 'self'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'"
 
 /** Reloads the page whenever index.html changes. */
 const RELOAD_SCRIPT = `<script>new EventSource('${RELOAD_PATH}').onmessage = () => location.reload()</script>`
@@ -149,13 +152,17 @@ function serve({ workspace, port, token }) {
     }
   })
 
+  let reloadTimer
   const watcher = watch(workspace, (_eventType, filename) => {
     if (filename !== 'index.html') return
-    reloadStreams.forEach((stream) => stream.write('data: reload\n\n'))
+
+    clearTimeout(reloadTimer)
+    reloadTimer = setTimeout(() => reloadStreams.forEach((stream) => stream.write('data: reload\n\n')), RELOAD_DEBOUNCE_MS)
   })
 
   /** Closes every connection and the watcher, so the process exits. */
   function shutDown() {
+    clearTimeout(reloadTimer)
     watcher.close()
     reloadStreams.forEach((stream) => stream.end())
     server.close()
@@ -217,16 +224,17 @@ async function start(workspace) {
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   })
 
-  const report = await waitForReport(child)
-  if (!report.listening) {
-    child.kill()
-    throw new Error(`the preview server did not start: ${report.error}`)
-  }
+  try {
+    const report = await waitForReport(child)
+    if (!report.listening) throw new Error(`the preview server did not start: ${report.error}`)
 
-  writeFileSync(path.join(workspace, STATE_FILE), JSON.stringify({ port, token }), { mode: 0o600 })
-  if (!(await waitUntilAnswering(`http://${HOST}:${port}/`))) {
+    writeFileSync(path.join(workspace, STATE_FILE), JSON.stringify({ port, token }), { mode: 0o600 })
+    if (!(await waitUntilAnswering(`http://${HOST}:${port}/`))) {
+      throw new Error(`the preview server on port ${port} did not answer`)
+    }
+  } catch (error) {
     child.kill()
-    throw new Error(`the preview server on port ${port} did not answer`)
+    throw error
   }
 
   child.unref()
@@ -244,6 +252,11 @@ function readState(workspace) {
   }
 }
 
+/** True when `error`, thrown by fetch, means nothing listens on the port. */
+function isConnectionRefused(error) {
+  return error.cause?.code === 'ECONNREFUSED'
+}
+
 /** True once nothing accepts connections on `port`. */
 async function portClosed(port) {
   try {
@@ -252,14 +265,15 @@ async function portClosed(port) {
 
     return false
   } catch (error) {
-    return error.cause?.code === 'ECONNREFUSED'
+    return isConnectionRefused(error)
   }
 }
 
 /**
  * Stops the server `start` left for `workspace`, then forgets it. Does
- * nothing when none was started or it is already gone. Throws when it won't
- * stop in time.
+ * nothing when none was started, it is already gone, or another listener
+ * holds the port and refuses the token. Throws, keeping the state, when the
+ * server can't be reached or won't stop in time.
  */
 async function stop(workspace) {
   const state = readState(workspace)
@@ -274,8 +288,8 @@ async function stop(workspace) {
       signal: AbortSignal.timeout(STOP_TIMEOUT_MS),
     })
     accepted = response.status === 204
-  } catch {
-    // Already gone, or never answered: there is nothing of ours to stop.
+  } catch (error) {
+    if (!isConnectionRefused(error)) throw new Error(`the preview server on port ${port} did not answer the stop request: ${error.message}`)
   }
 
   const deadline = Date.now() + STOP_TIMEOUT_MS
@@ -298,7 +312,7 @@ try {
   } else if (command === 'stop') {
     await stop(workspace)
   } else {
-    throw new Error(`unknown command ${command}; use start or stop`)
+    throw new Error(`unknown command ${command}; use start, stop, or serve`)
   }
 } catch (error) {
   process.stderr.write(`vibe-coding-mad-libs: ${error.message}\n`)

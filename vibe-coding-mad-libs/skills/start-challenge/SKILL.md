@@ -11,11 +11,10 @@ Be warm, brief, and concrete. Work only in the current directory.
 
 Welcome the participant in two or three sentences, then say that a form opens
 once you finish: four blanks, Theme (the kind of app), Subject, Audience, and
-Style. Tab and Shift+Tab move between blanks, Enter moves on and then builds,
-and Esc closes the form; `/mad-libs` reopens it. They can invent answers or
-roll the booth's dice against `dice-sheet.md` in this folder. You can't roll
-for them, so never pretend you did. If the form doesn't open, they can type
-the whole sentence instead:
+Style. The form shows its own keys, and `/mad-libs` reopens it if they close
+it. They can invent answers or roll the booth's dice against `dice-sheet.md`
+in this folder. You can't roll for them, so never pretend you did. If the form
+doesn't open, they can type the whole sentence instead:
 
 > Build a [Theme] about [Subject] for [Audience] in [Style] style.
 
