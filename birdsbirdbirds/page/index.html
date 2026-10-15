@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BirdsBirdBirds</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/style.css">
+  <style id="bird-keyframes"></style>
+  <script type="module" src="/app.mjs"></script>
+</head>
+
+<body>
+  <main id="draw-mode">
+    <header class="draw-header">
+      <h1>Draw your bird</h1>
+      <p class="lead">Draw one bird, big and bold, then press <strong>Save my bird</strong>. Pi takes it from there.</p>
+    </header>
+
+    <div class="draw-layout">
+      <div class="toolbar" role="toolbar" aria-label="Drawing tools">
+        <fieldset class="tool-group">
+          <legend>Colour</legend>
+          <div class="swatches" id="swatches"></div>
+        </fieldset>
+
+        <fieldset class="tool-group">
+          <legend>Pen size</legend>
+          <div class="sizes" id="sizes"></div>
+        </fieldset>
+
+        <fieldset class="tool-group">
+          <legend>Tool</legend>
+          <div class="tools">
+            <button type="button" class="tool-button" id="pen-button" aria-pressed="true">Pen</button>
+            <button type="button" class="tool-button" id="eraser-button" aria-pressed="false">Eraser</button>
+          </div>
+        </fieldset>
+
+        <div class="tool-group actions">
+          <button type="button" class="action-button" id="undo-button" title="Undo (Ctrl+Z or Cmd+Z)" disabled>Undo</button>
+          <button type="button" class="action-button" id="clear-button">Clear</button>
+        </div>
+      </div>
+
+      <div class="canvas-column">
+        <div class="canvas-frame">
+          <canvas id="drawing" width="512" height="512" aria-label="Drawing canvas"></canvas>
+        </div>
+        <button type="button" class="save-button" id="save-button">Save my bird</button>
+        <p class="status" id="status" role="status" aria-live="polite">Pick a colour and start drawing.</p>
+        <p class="waiting" id="waiting-note" hidden>Waiting for Pi's flight plan…</p>
+        <button type="button" class="link-button" id="to-sky-button" hidden>Back to the sky</button>
+      </div>
+    </div>
+  </main>
+
+  <section id="sky-mode" hidden aria-label="Your bird flying">
+    <div class="sky-title">Look at it go!</div>
+    <div id="sky"></div>
+    <button type="button" class="draw-again-button" id="draw-again-button">Draw again</button>
+  </section>
+</body>
+
+</html>
