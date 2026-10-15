@@ -4,9 +4,11 @@
 // setup and cleanup hooks start and stop it; the label never parses HTML.
 
 import assert from 'node:assert/strict'
-import { execFile, spawnSync } from 'node:child_process'
+import { execFile, spawn, spawnSync } from 'node:child_process'
+import fs from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import { syncBuiltinESMExports } from 'node:module'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -14,13 +16,14 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateSync } from 'node:zlib'
 
-import { checkBird, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../birdsbirdbirds/check-bird.mjs'
+import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../birdsbirdbirds/check-bird.mjs'
 import { createBirdLabel } from '../birdsbirdbirds/page/bird-label.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../birdsbirdbirds/server.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const packageDirectory = path.join(testDirectory, '..', 'birdsbirdbirds')
 const checkerScript = path.join(packageDirectory, 'check-bird.mjs')
+const serverScript = path.join(packageDirectory, 'server.mjs')
 
 // Entries from the BirdsBirdBirds gallery's manifest.json, with `id` and `image` removed.
 const GALLERY_BIRDS = [
@@ -115,6 +118,21 @@ const withTemporaryDirectory = async (body) => {
 for (const bird of GALLERY_BIRDS) {
   test(`accepts the gallery bird ${bird.animation.animation_name}`, () => {
     const errors = checkBird(bird)
+
+    assert.deepEqual(errors, [])
+  })
+}
+
+const ACCEPTED_LABELS = [
+  { behavior: 'a Persian name joined with a zero-width non-joiner', bird_name: 'می\u200Cخواهم' },
+  { behavior: 'a Sinhala origin joined with a zero-width joiner', origin: 'ශ්\u200Dරී ලංකාව' },
+  { behavior: 'emoji built with zero-width joiners and a variation selector', bird_name: '👩\u200D💻 🏳\uFE0F\u200D🌈' },
+  { behavior: 'a Tibetan name with three marks stacked on one letter', bird_name: 'སྒྲུབ' },
+]
+
+for (const { behavior, ...labels } of ACCEPTED_LABELS) {
+  test(`accepts ${behavior}`, () => {
+    const errors = checkBird(birdEntry(labels))
 
     assert.deepEqual(errors, [])
   })
@@ -248,8 +266,28 @@ const REJECTED_BIRDS = [
   },
   {
     behavior: 'rejects accent marks stacked on one letter',
-    entry: birdEntry({ bird_name: 'Ro\u0301\u0302\u0303bin' }),
-    mentions: /bird_name stacks 3 accent marks on one letter; use at most 2/,
+    entry: birdEntry({ bird_name: 'Ro\u0301\u0302\u0303\u0304\u0305bin' }),
+    mentions: /bird_name stacks 5 accent marks on one letter; use at most 4/,
+  },
+  {
+    behavior: 'rejects a bidi isolate in the origin',
+    entry: birdEntry({ origin: 'Durham\u2066NC' }),
+    mentions: /origin contains the invisible character U\+2066; use plain visible text/,
+  },
+  {
+    behavior: 'rejects a soft hyphen in the bird name',
+    entry: birdEntry({ bird_name: 'Rob\u00ADin' }),
+    mentions: /bird_name contains the invisible character U\+00AD; use plain visible text/,
+  },
+  {
+    behavior: 'rejects a percentage as the z length of translate3d()',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate3d(0, 0, 5%); } }'),
+    mentions: /css_keyframes: translate3d\(0, 0, 5%\) needs a length unit \(vw, vh, px, em, or rem; % is not allowed for z\) on 5%/,
+  },
+  {
+    behavior: 'rejects a unit written in capitals, saying units are lowercase',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(1PX, 0); } }'),
+    mentions: /css_keyframes: translate\(1PX, 0\) writes the unit of 1PX in capitals; units are lowercase, like 1px/,
   },
   {
     behavior: 'rejects a bird name with no visible letters, digits, or symbols',
@@ -373,16 +411,18 @@ const startBirdServer = async (testContext, workspace) => {
  * Sends one HTTP request with exactly the given path and headers (Host
  * defaults to 127.0.0.1:<port>) and resolves `{ status, headers, body }`.
  * Errors after the response arrives, such as the server dropping an
- * oversized upload, are ignored.
+ * oversized upload, are ignored. With `timeoutMs`, rejects when the server
+ * goes quiet for that long.
  */
-const sendRequest = ({ port, method = 'GET', requestPath = '/', headers = {}, body }) => new Promise((resolve, reject) => {
-  const request = http.request({ host: '127.0.0.1', port, method, path: requestPath, headers: { host: `127.0.0.1:${port}`, ...headers } }, (response) => {
+const sendRequest = ({ port, method = 'GET', requestPath = '/', headers = {}, body, timeoutMs }) => new Promise((resolve, reject) => {
+  const request = http.request({ host: '127.0.0.1', port, method, path: requestPath, headers: { host: `127.0.0.1:${port}`, ...headers }, timeout: timeoutMs }, (response) => {
     const chunks = []
     response.on('data', (chunk) => chunks.push(chunk))
     response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }))
     response.on('error', () => resolve({ status: response.statusCode, headers: response.headers, body: Buffer.concat(chunks) }))
   })
   request.on('error', reject)
+  request.on('timeout', () => request.destroy(new Error(`${method} ${requestPath} got no answer within ${timeoutMs} ms`)))
   request.end(body)
 })
 
@@ -495,16 +535,6 @@ test('the server answers 422 for a bird.json over the byte cap', (testContext) =
   assert.equal(response.status, 422)
 }))
 
-test('the server answers 422 for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(testContext, workspace)
-  makeFifo(path.join(workspace, 'bird.json'))
-
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
-
-  assert.equal(response.status, 422)
-  assert.equal((await sendRequest({ port, requestPath: '/health' })).status, 200)
-}))
-
 test('the server refuses a symlinked bird.json without echoing its target', (testContext) => withWorkspace(async ({ directory, workspace }) => {
   const port = await startBirdServer(testContext, workspace)
   const target = path.join(directory, 'secret.txt')
@@ -515,6 +545,56 @@ test('the server refuses a symlinked bird.json without echoing its target', (tes
 
   assert.equal(response.status, 422)
   assert.ok(!response.body.toString().includes('top-secret'), response.body.toString())
+}))
+
+test('the server refuses a symlinked bird.json even when its target is a valid bird', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const target = path.join(directory, 'valid-bird.json')
+  await writeFile(target, JSON.stringify(GALLERY_BIRDS[0]))
+  await symlink(target, path.join(workspace, 'bird.json'))
+
+  const response = await sendRequest({ port, requestPath: '/bird.json' })
+
+  assert.equal(response.status, 422)
+  assert.match(JSON.parse(response.body).errors.join('\n'), /bird.json is not a regular file/)
+}))
+
+/**
+ * Makes lstat follow symlinks until the test ends, the way a symlink swapped
+ * in between the lstat check and the open would look to the reader.
+ */
+const swapInSymlinksAfterLstat = (testContext) => {
+  const realLstatSync = fs.lstatSync
+  fs.lstatSync = fs.statSync
+  syncBuiltinESMExports()
+  testContext.after(() => {
+    fs.lstatSync = realLstatSync
+    syncBuiltinESMExports()
+  })
+}
+
+test('the server refuses a bird.png symlink swapped in after the lstat check', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const target = path.join(directory, 'elsewhere.png')
+  await writeFile(target, TINY_PNG)
+  await symlink(target, path.join(workspace, 'bird.png'))
+  swapInSymlinksAfterLstat(testContext)
+
+  const response = await sendRequest({ port, requestPath: '/bird.png' })
+
+  assert.equal(response.status, 422)
+  assert.match(response.body.toString(), /bird.png is not a regular file/)
+}))
+
+test('the checker refuses a bird.json symlink swapped in after the lstat check', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const target = path.join(directory, 'valid-bird.json')
+  await writeFile(target, JSON.stringify(GALLERY_BIRDS[0]))
+  await symlink(target, path.join(workspace, 'bird.json'))
+  swapInSymlinksAfterLstat(testContext)
+
+  const { errors } = loadBirdFile(path.join(workspace, 'bird.json'))
+
+  assert.match(errors.join('\n'), /bird.json is not a regular file/)
 }))
 
 test('the server does not serve a symlinked bird.png', (testContext) => withWorkspace(async ({ directory, workspace }) => {
@@ -547,6 +627,38 @@ const findFreePort = () => new Promise((resolve, reject) => {
   })
 })
 
+/**
+ * Starts server.mjs as a child process for `workspace` on a free port, killed
+ * when the test ends; resolves its port once it says it is serving. A child
+ * keeps a blocked server from freezing the test runner too.
+ */
+const startServerProcess = async (testContext, workspace) => {
+  const port = await findFreePort()
+  const child = spawn(process.execPath, [serverScript], {
+    env: { ...process.env, BIRDSBIRDBIRDS_WORKSPACE: workspace, BIRDSBIRDBIRDS_TOKEN: SERVER_TOKEN, BIRDSBIRDBIRDS_PORT: String(port) },
+    stdio: ['ignore', 'pipe', 'inherit'],
+  })
+  testContext.after(() => child.kill('SIGKILL'))
+  await new Promise((resolve, reject) => {
+    child.stdout.on('data', (chunk) => {
+      if (chunk.toString().includes('serving')) resolve()
+    })
+    child.on('exit', (code) => reject(new Error(`server.mjs exited with ${code} before serving`)))
+  })
+
+  return port
+}
+
+test('the server answers 422 for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startServerProcess(testContext, workspace)
+  makeFifo(path.join(workspace, 'bird.json'))
+
+  const response = await sendRequest({ port, requestPath: '/bird.json', timeoutMs: 5000 })
+
+  assert.equal(response.status, 422)
+  assert.equal((await sendRequest({ port, requestPath: '/health', timeoutMs: 5000 })).status, 200)
+}))
+
 /** Runs the package's `setup` or `cleanup` hook for `workspace` on `port`; resolves `{ code, stdout, stderr }`. */
 const runHook = (hook, { workspace, port }) => new Promise((resolve) => {
   const environment = { ...process.env, BOOTHSTRAP_WORKSPACE: workspace, BIRDSBIRDBIRDS_PORT: String(port) }
@@ -555,12 +667,18 @@ const runHook = (hook, { workspace, port }) => new Promise((resolve) => {
   })
 })
 
-/** Runs setup in a fresh workspace on a free port, with cleanup registered for when the test ends. */
+/**
+ * Runs setup in a fresh workspace on a free port. The server is shut down by
+ * its token when the test ends, since the workspace, and with it the record
+ * cleanup reads, is gone by then.
+ */
 const runSetup = async (testContext, workspace) => {
   const port = await findFreePort()
-  testContext.after(() => runHook('cleanup', { workspace, port }))
+  const setupResult = await runHook('setup', { workspace, port })
+  const { token } = JSON.parse(await readFile(path.join(workspace, '.birdsbirdbirds', 'server.json'), 'utf8'))
+  testContext.after(() => sendRequest({ port, method: 'POST', requestPath: '/shutdown', headers: { 'x-bird-token': token } }).catch(() => {}))
 
-  return { port, setupResult: await runHook('setup', { workspace, port }) }
+  return { port, setupResult }
 }
 
 /** True when something answers GET /health on `port`. */

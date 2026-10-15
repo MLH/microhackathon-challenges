@@ -69,9 +69,12 @@ An item is published with kind `bird` and renderer `birds-v1`. The image is
 | `animation.timing_function` | string | `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, or `cubic-bezier(x1, y1, x2, y2)` with plain numbers and x1, x2 from 0 to 1 |
 
 `bird_name` and `origin` hold at least one visible letter, digit, symbol, or
-punctuation mark, with no control characters, no invisible formatting
-characters (Unicode `Cf`, such as zero-width spaces and bidi overrides), no
-line or paragraph separators, and at most 2 accent marks stacked on a letter.
+punctuation mark, and at most 4 accent marks stacked on a letter. They hold
+no control characters, bidi controls (U+061C, U+200E, U+200F, U+202A to
+U+202E, U+2066 to U+2069), invisible characters (U+200B, U+2060 to U+2064,
+U+FEFF, U+00AD), or line and paragraph separators (U+2028, U+2029). The
+zero-width joiner and non-joiner (U+200D, U+200C) and the emoji variation
+selector (U+FE0F) are allowed, since real names and emoji need them.
 
 The `fly_` prefix keeps a bird's keyframes from colliding with CSS keywords
 or with the sky page's own `flap` keyframes.
@@ -95,12 +98,14 @@ to 100%.
 - `transform` values: `none`, or these functions with comma-separated
   arguments, where only 0 may go without a unit:
   - `translate`, `translateX`, `translateY`, `translate3d`: lengths in `vw`,
-    `vh`, `px`, `em`, `rem`, or `%`.
+    `vh`, `px`, `em`, `rem`, or `%`; the z length of `translate3d` can't be
+    `%`.
   - `rotate`, `rotateZ`, `skew`, `skewX`, `skewY`: angles in `deg` or `turn`.
   - `scale`, `scaleX`, `scaleY`: plain numbers with no unit.
 - `opacity`: a number from 0 to 1.
 - `animation-timing-function`: the same values as `timing_function`.
 - Numbers are plain decimals such as `1000px`, never exponents like `1e3px`.
+  Units are lowercase.
 - The keyframes name starts with `fly_`.
 - Rejected: `url(`, `@import`, a second at-rule, backslash escapes, quotes,
   `<`, comments, `!important`, unbalanced braces, text after the rule, and a

@@ -9,6 +9,9 @@ import path from 'node:path'
 /** O_NOFOLLOW refuses a symlink swapped in after lstat; O_NONBLOCK keeps a swapped-in pipe from blocking open. */
 const OPEN_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0)
 
+/** The errors open gives under O_NOFOLLOW for a symlink: ELOOP on Linux, EMLINK on some BSDs. */
+const SYMLINK_OPEN_ERRORS = ['ELOOP', 'EMLINK']
+
 /** A workspace file that is not a regular file, or is over its byte cap; the message names it. */
 export class RefusedFileError extends Error {
   /** Builds the error; `tooLarge` tells a size refusal apart from a file-type one. */
@@ -33,7 +36,7 @@ export function readWorkspaceFile(filePath, maxBytes) {
 
   if (!lstatSync(filePath).isFile()) throw notRegular()
 
-  const descriptor = openSync(filePath, OPEN_FLAGS)
+  const descriptor = openRefusingSymlinks(filePath, notRegular)
   try {
     const stats = fstatSync(descriptor)
     if (!stats.isFile()) throw notRegular()
@@ -51,5 +54,15 @@ export function readWorkspaceFile(filePath, maxBytes) {
     return buffer.subarray(0, bytesRead)
   } finally {
     closeSync(descriptor)
+  }
+}
+
+/** Opens `filePath` with OPEN_FLAGS, throwing `notRegular()` when it turned out to be a symlink. */
+function openRefusingSymlinks(filePath, notRegular) {
+  try {
+    return openSync(filePath, OPEN_FLAGS)
+  } catch (error) {
+    if (SYMLINK_OPEN_ERRORS.includes(error.code)) throw notRegular()
+    throw error
   }
 }

@@ -35,6 +35,11 @@ const ARGUMENT_KINDS = {
     bareZero: true,
     problem: (call, argument) => `${call} needs a length unit (vw, vh, px, em, rem, or %) on ${argument.text}; only 0 may go without one`,
   },
+  depth: {
+    units: ['vw', 'vh', 'px', 'em', 'rem'],
+    bareZero: true,
+    problem: (call, argument) => `${call} needs a length unit (vw, vh, px, em, or rem; % is not allowed for z) on ${argument.text}; only 0 may go without one`,
+  },
   angle: {
     units: ['deg', 'turn'],
     bareZero: true,
@@ -47,20 +52,25 @@ const ARGUMENT_KINDS = {
   },
 }
 
-/** Each allowed transform function: its argument count as [minimum, maximum], and the kind of argument it takes. */
+const { length, depth, angle, number } = ARGUMENT_KINDS
+
+/**
+ * Each allowed transform function: the fewest arguments it takes, and the
+ * kind of each argument in order (so the most it takes is their count).
+ */
 const TRANSFORM_FUNCTIONS = {
-  translate: { arity: [1, 2], kind: ARGUMENT_KINDS.length },
-  translateX: { arity: [1, 1], kind: ARGUMENT_KINDS.length },
-  translateY: { arity: [1, 1], kind: ARGUMENT_KINDS.length },
-  translate3d: { arity: [3, 3], kind: ARGUMENT_KINDS.length },
-  rotate: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
-  rotateZ: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
-  scale: { arity: [1, 2], kind: ARGUMENT_KINDS.number },
-  scaleX: { arity: [1, 1], kind: ARGUMENT_KINDS.number },
-  scaleY: { arity: [1, 1], kind: ARGUMENT_KINDS.number },
-  skew: { arity: [1, 2], kind: ARGUMENT_KINDS.angle },
-  skewX: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
-  skewY: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
+  translate: { minimum: 1, kinds: [length, length] },
+  translateX: { minimum: 1, kinds: [length] },
+  translateY: { minimum: 1, kinds: [length] },
+  translate3d: { minimum: 3, kinds: [length, length, depth] },
+  rotate: { minimum: 1, kinds: [angle] },
+  rotateZ: { minimum: 1, kinds: [angle] },
+  scale: { minimum: 1, kinds: [number, number] },
+  scaleX: { minimum: 1, kinds: [number] },
+  scaleY: { minimum: 1, kinds: [number] },
+  skew: { minimum: 1, kinds: [angle, angle] },
+  skewX: { minimum: 1, kinds: [angle] },
+  skewY: { minimum: 1, kinds: [angle] },
 }
 
 /** Raw substrings rejected before tokenizing, each with the fix Pi should make. */
@@ -77,10 +87,16 @@ const FORBIDDEN_TEXT = [
 const ANIMATION_NAME_PATTERN = /^fly_[A-Za-z0-9_-]{1,60}$/
 const DURATION_PATTERN = /^\d+(\.\d+)?s$/
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
-const INVISIBLE_CHARACTER_PATTERN = /[\p{Cf}\p{Zl}\p{Zp}]/u
+
+/**
+ * Bidi controls, zero-width and other invisible characters, and line and
+ * paragraph separators. Zero-width (non-)joiners and the emoji variation
+ * selector stay allowed: Persian, Sinhala, Devanagari, and emoji need them.
+ */
+const INVISIBLE_CHARACTER_PATTERN = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u200B\u2060-\u2064\uFEFF\u00AD\u2028\u2029]/u
 const VISIBLE_CHARACTER_PATTERN = /[\p{L}\p{N}\p{S}\p{P}]/u
-const STACKED_MARKS_PATTERN = /\p{M}{3,}/u
-const MAX_STACKED_MARKS = 2
+const MAX_STACKED_MARKS = 4
+const STACKED_MARKS_PATTERN = new RegExp(`\\p{M}{${MAX_STACKED_MARKS + 1},}`, 'u')
 const KEYFRAMES_FIELD = 'animation.css_keyframes'
 const PUNCTUATION = new Set(['{', '}', ':', ';', ',', ')'])
 const WHITESPACE = new Set([' ', '\t', '\n', '\r', '\f'])
@@ -549,25 +565,30 @@ function checkTransformValue(value) {
       throw keyframesError(`transform ${describe(transformFunction)} is not allowed; use none or these functions: ${Object.keys(TRANSFORM_FUNCTIONS).join(', ')}`)
     }
     const { argumentTokens, next } = readArguments(value, position + 1, `${KEYFRAMES_FIELD}: transform ${transformFunction.value}(`)
-    const { arity: [minimum, maximum], kind } = TRANSFORM_FUNCTIONS[transformFunction.value]
+    const { minimum, kinds } = TRANSFORM_FUNCTIONS[transformFunction.value]
+    const maximum = kinds.length
     if (argumentTokens.length < minimum || argumentTokens.length > maximum) {
       const expected = minimum === maximum ? `${minimum}` : `${minimum} or ${maximum}`
       throw keyframesError(`transform ${transformFunction.value}() takes ${expected} argument${maximum === 1 ? '' : 's'} but got ${argumentTokens.length}`)
     }
-    const misfit = argumentTokens.find((argument) => !fitsKind(argument, kind))
-    if (misfit !== undefined) {
-      const call = `${transformFunction.value}(${argumentTokens.map((argument) => argument.text).join(', ')})`
-      throw keyframesError(kind.problem(call, misfit))
-    }
+    const call = `${transformFunction.value}(${argumentTokens.map((argument) => argument.text).join(', ')})`
+    argumentTokens.forEach((argument, index) => checkArgumentKind(call, argument, kinds[index]))
     position = next
   }
 }
 
-/** True when a number token has one of the kind's units, or is a bare 0 where the kind allows it. */
-function fitsKind(argument, kind) {
-  if (kind.units.includes(argument.unit)) return true
+/**
+ * Fails unless a number token has one of the kind's units, or is a bare 0
+ * where the kind allows it. `call` is the transform as written, for the message.
+ */
+function checkArgumentKind(call, argument, kind) {
+  if (kind.units.includes(argument.unit)) return
+  if (kind.bareZero && argument.unit === '' && argument.value === 0) return
+  if (kind.units.includes(argument.unit.toLowerCase())) {
+    throw keyframesError(`${call} writes the unit of ${argument.text} in capitals; units are lowercase, like ${argument.value}${argument.unit.toLowerCase()}`)
+  }
 
-  return kind.bareZero && argument.unit === '' && argument.value === 0
+  throw keyframesError(kind.problem(call, argument))
 }
 
 /** Reads comma-separated number arguments up to ")" starting at `position`. Returns them and the position after ")". */

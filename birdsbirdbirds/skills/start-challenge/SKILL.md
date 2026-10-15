@@ -105,13 +105,13 @@ Only with `publish_gallery_item`. Use the display name from `session_info`
 and ask: "Want this on the booth screens? It'll show with your name,
 [display name], and staff can remove it at any time."
 
-On a yes, call `publish_gallery_item` with:
+On a yes, run the checker once more, then `read` `bird.json` and call
+`publish_gallery_item` with:
 
 - `kind`: `bird`
 - `title`: `<bird_name> from <origin>`
 - `renderer`: `birds-v1`
 - `files`: `["bird.png"]`
-- `payload`: Run the checker once more, then `read` bird.json and pass
-  exactly that object as `payload`.
+- `payload`: exactly the object you just read from `bird.json`
 
 On a no, move on without publishing.
