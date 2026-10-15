@@ -28,8 +28,8 @@ When this skill says to report a step and `report_step` is missing, tell the
 participant which step they finished instead, without mentioning points.
 
 1. **fill-prompt.** When their sentence arrives with all four blanks filled,
-   say back what you'll build in one sentence and report `fill-prompt`. A
-   bracketed blank or a request to skip doesn't count.
+   say back what you'll build in one sentence and report `fill-prompt` before
+   you start building. A bracketed blank or a request to skip doesn't count.
 2. **build-app.** Write the app to `index.html`, then read it back to check
    it is whole. Once it exists, ask whether they want to see it, and after a
    yes call `show_preview` with `http://127.0.0.1:4321/`; when `show_preview`
