@@ -4,6 +4,8 @@
   "ignores": [
     // Its placeholders read as HTML, and it opens without a heading by design.
     ".github/pull_request_template.md",
+    // The spec bars a title: the Intro screen draws it from the manifest.
+    "*/intro.md",
     // Fixture Markdown is test data, not documentation.
     "test/fixtures/**",
     "**/node_modules/**"
