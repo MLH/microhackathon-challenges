@@ -1,8 +1,6 @@
 #!/bin/sh
-set -u
+set -eu
 
 workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
 
-# Teardown must never fail, whatever state setup left behind.
-rm -f -- "$workspace/welcome.txt" 2>/dev/null
-exit 0
+rm -f -- "$workspace/welcome.txt"

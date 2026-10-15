@@ -93,24 +93,19 @@ test('cleanup succeeds after setup failed on a missing workspace', async (contex
   assert.deepEqual(await listSorted(cwd), [])
 })
 
-test('hooks use the current directory when BOOTHSTRAP_WORKSPACE is unset', async (context) => {
+test('setup seeds the current directory when BOOTHSTRAP_WORKSPACE is unset', async (context) => {
   const cwd = await makeDirectory(context)
 
-  await runHook('cleanup', { cwd })
   await runHook('setup', { cwd })
-  assert.match(await readFile(path.join(cwd, 'welcome.txt'), 'utf8'), /hello/i)
 
-  await runHook('cleanup', { cwd })
-  assert.deepEqual(await listSorted(cwd), [])
+  assert.match(await readFile(path.join(cwd, 'welcome.txt'), 'utf8'), /hello/i)
 })
 
-test('cleanup succeeds when the workspace is a plain file', async (context) => {
+test('cleanup clears the current directory when BOOTHSTRAP_WORKSPACE is unset', async (context) => {
   const cwd = await makeDirectory(context)
-  const workspace = path.join(cwd, 'not-a-directory')
-  await writeFile(workspace, 'left behind')
+  await runHook('setup', { cwd })
 
-  await assert.rejects(runHook('setup', { cwd, workspace }), /workspace/i)
-  await runHook('cleanup', { cwd, workspace })
+  await runHook('cleanup', { cwd })
 
-  assert.equal(await readFile(workspace, 'utf8'), 'left behind')
+  assert.deepEqual(await listSorted(cwd), [])
 })

@@ -1,9 +1,5 @@
-# What you'll do
-
-Meet Pi, your AI guide. You'll ask it to read a welcome note and then
-make a small text file for you. No terminal experience needed.
-
-1. Ask Pi to read `welcome.txt` and say hello.
-2. Ask Pi to create `hello.txt` containing `Hello, world!`.
+Meet Pi, your AI guide. Ask it to read the welcome note, `welcome.txt`, and
+say hello. Then ask it to make a small text file, `hello.txt`, that says
+`Hello, world!`. No terminal experience needed.
 
 You'll practice giving an agent a clear instruction and checking its work.

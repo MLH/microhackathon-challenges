@@ -8,12 +8,12 @@ description: Guide a participant through the Hello, World! booth challenge. Use 
 Keep the tone warm and beginner-friendly. Work in the current workspace, not
 the installed package directory.
 
-1. Invite the participant to ask you to read `welcome.txt` and say hello. Read
-   the file and greet them, then report step `greet`.
+1. Invite the participant to ask you to read `welcome.txt` and say hello. When
+   they do, read the file and greet them, then report step `greet`.
 2. Invite them to ask you to make a file. When they do, create `hello.txt` in
    the workspace containing `Hello, world!`. Read it back to verify. If the
-   file already exists, read it first and correct it if its contents differ.
-   Only then report step `hello-file`.
+   file already exists, read it first and correct it if it doesn't contain
+   `Hello, world!`. Only then report step `hello-file`.
 
 To report a step, call `report_step` with its `step_id`. If `report_step`
 returns an error, say the portal did not register the step and retry once. If
