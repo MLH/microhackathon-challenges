@@ -4,25 +4,26 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { assemblePrompt, isFinishedPrompt } from '../vibe-coding-mad-libs/prompt.mjs'
+import { assemblePrompt, fillSentence, isFinishedPrompt } from '../vibe-coding-mad-libs/prompt.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const packageDirectory = path.join(testDirectory, '..', 'vibe-coding-mad-libs')
 const installTimeoutMilliseconds = 300_000
+const serverExitTimeoutMilliseconds = 5_000
 
 const filledAnswers = { theme: 'game', subject: 'cats', audience: 'kids', style: 'retro' }
 
-/** Makes a fresh temporary directory that `test` removes when the test ends. */
-const makeTemporaryDirectory = async (test) => {
+/** Makes a fresh temporary directory that `context` removes when the test ends. */
+const makeTemporaryDirectory = async (context) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'mad-libs-test-'))
-  test.after(() => rm(directory, { recursive: true, force: true }))
+  context.after(() => rm(directory, { recursive: true, force: true }))
 
   return directory
 }
@@ -38,9 +39,9 @@ const findFreePort = () => new Promise((resolve, reject) => {
 })
 
 /** Starts a server on `port` that answers every request with `body`. */
-const holdPort = (test, port, body) => new Promise((resolve, reject) => {
+const holdPort = (context, port, body) => new Promise((resolve, reject) => {
   const server = createServer((_request, response) => response.end(body))
-  test.after(() => new Promise((done) => {
+  context.after(() => new Promise((done) => {
     server.close(done)
     server.closeAllConnections()
   }))
@@ -56,18 +57,19 @@ const runExecutable = (command, args, options) => new Promise((resolve, reject) 
   child.stdout.on('data', (chunk) => { stdout += chunk })
   child.stderr.on('data', (chunk) => { stderr += chunk })
   child.once('error', reject)
-  child.once('close', (code) => resolve({ code, stdout, stderr }))
+  child.once('close', (code) => resolve({ code, stdout, stderr, pid: child.pid }))
 })
 
-/** Runs the package's `hook` (setup or cleanup) with the workspace and preview port set. */
-const runHook = (hook, workspace, port) => runExecutable(path.join(packageDirectory, hook), [], {
+/** Runs the package's `hook` (setup or cleanup) with the workspace and preview port set; `options` adds spawn options. */
+const runHook = (hook, workspace, port, options) => runExecutable(path.join(packageDirectory, hook), [], {
+  ...options,
   env: { ...process.env, BOOTHSTRAP_WORKSPACE: workspace, MAD_LIBS_PREVIEW_PORT: String(port) },
 })
 
 /** Makes a workspace and registers cleanup to run in teardown, so no server outlives the test. */
-const makeWorkspace = async (test, port) => {
+const makeWorkspace = async (context, port) => {
   const workspace = await mkdtemp(path.join(tmpdir(), 'mad-libs-test-'))
-  test.after(async () => {
+  context.after(async () => {
     await runHook('cleanup', workspace, port)
     await rm(workspace, { recursive: true, force: true })
   })
@@ -93,6 +95,26 @@ const isRefused = async (port) => {
   return false
 }
 
+/** Polls until connecting to `port` is refused, failing the test if it never is. */
+const waitUntilRefused = async (port) => {
+  const deadline = Date.now() + serverExitTimeoutMilliseconds
+  while (!(await isRefused(port))) {
+    assert.ok(Date.now() < deadline, `port ${port} still accepts connections`)
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+}
+
+/** Reads one column of `ps` for `pid`, such as `pgid`. */
+const readProcessColumn = async (column, pid) => (await runExecutable('ps', ['-o', `${column}=`, '-p', String(pid)])).stdout.trim()
+
+/** Finds the pid of the preview server serving `workspace`, or undefined when none runs. */
+const findServerPid = async (workspace) => {
+  const { stdout } = await runExecutable('ps', ['-eo', 'pid=,args='])
+  const line = stdout.split('\n').find((candidate) => candidate.endsWith(`preview.mjs serve ${workspace}`))
+
+  return line === undefined ? undefined : Number(line.trim().split(/\s+/)[0])
+}
+
 /** True when `target` exists. */
 const exists = (target) => stat(target).then(() => true, () => false)
 
@@ -112,6 +134,22 @@ test('fills the sentence from four answers, trimmed', () => {
   const sentence = assemblePrompt(answers)
 
   assert.equal(sentence, 'Build a game about cats for kids in retro style.')
+})
+
+test('uses "an" before a Theme that starts with a vowel', () => {
+  const answers = { ...filledAnswers, theme: 'arcade game' }
+
+  const sentence = assemblePrompt(answers)
+
+  assert.equal(sentence, 'Build an arcade game about cats for kids in retro style.')
+})
+
+test('fills the form preview with answers as typed and brackets the blanks', () => {
+  const answers = { theme: 'price $& game', subject: ' ' }
+
+  const sentence = fillSentence(answers)
+
+  assert.equal(sentence, 'Build a price $& game about [Subject] for [Audience] in [Style] style.')
 })
 
 for (const [key, label] of Object.entries(fieldNames)) {
@@ -148,13 +186,13 @@ for (const { name, text, finished } of finishedPromptCases) {
   })
 }
 
-test('loads the extension under the pinned Pi packages after install', { timeout: installTimeoutMilliseconds + 60_000 }, async (test) => {
-  const installedPackage = path.join(await makeTemporaryDirectory(test), 'package')
+test('loads the extension under the pinned Pi packages after install', { timeout: installTimeoutMilliseconds + 60_000 }, async (context) => {
+  const installedPackage = path.join(await makeTemporaryDirectory(context), 'package')
   await cp(packageDirectory, installedPackage, { recursive: true, filter: (source) => path.basename(source) !== 'node_modules' })
   const installed = await runExecutable(path.join(installedPackage, 'install'), [], { timeout: installTimeoutMilliseconds })
   assert.equal(installed.code, 0, installed.stderr)
-  const projectDirectory = await makeTemporaryDirectory(test)
-  const agentDirectory = await makeTemporaryDirectory(test)
+  const projectDirectory = await makeTemporaryDirectory(context)
+  const agentDirectory = await makeTemporaryDirectory(context)
   const piDirectory = path.join(installedPackage, 'node_modules', '@earendil-works', 'pi-coding-agent')
   const pi = await import(pathToFileURL(path.join(piDirectory, 'dist', 'index.js')))
 
@@ -170,27 +208,49 @@ test('loads the extension under the pinned Pi packages after install', { timeout
   }
 })
 
-test('setup copies the dice sheet and serves the waiting page, then the app once index.html exists', async (test) => {
+test('setup copies the dice sheet and serves the waiting page', async (context) => {
   const port = await findFreePort()
-  const workspace = await makeWorkspace(test, port)
+  const workspace = await makeWorkspace(context, port)
 
   const setup = await runHook('setup', workspace, port)
   const waiting = await getPreview(port)
-  await writeFile(path.join(workspace, 'index.html'), '<!doctype html><title>My app</title><body>hello app</body>')
-  const app = await getPreview(port)
 
   assert.equal(setup.code, 0, setup.stderr)
   assert.equal(await readFile(path.join(workspace, 'dice-sheet.md'), 'utf8'), await readFile(path.join(packageDirectory, 'dice-sheet.md'), 'utf8'))
   assert.equal(waiting.status, 200)
   assert.match(waiting.text, /Waiting for your app/)
+})
+
+test('the preview serves index.html once it exists', async (context) => {
+  const port = await findFreePort()
+  const workspace = await makeWorkspace(context, port)
+  const setup = await runHook('setup', workspace, port)
+  assert.equal(setup.code, 0, setup.stderr)
+  await writeFile(path.join(workspace, 'index.html'), '<!doctype html><title>My app</title><body>hello app</body>')
+
+  const app = await getPreview(port)
+
   assert.equal(app.status, 200)
   assert.match(app.text, /hello app/)
 })
 
-test('setup fails naming the port when it is busy, and leaves the other listener and no state file', async (test) => {
+test('setup keeps the preview server in setup\'s own process group', async (context) => {
   const port = await findFreePort()
-  await holdPort(test, port, 'foreign listener')
-  const workspace = await makeWorkspace(test, port)
+  const workspace = await makeWorkspace(context, port)
+
+  const setup = await runHook('setup', workspace, port, { detached: true })
+  const serverPid = await findServerPid(workspace)
+  context.after(() => { try { process.kill(-setup.pid, 'SIGKILL') } catch { /* The group is already gone. */ } })
+
+  assert.equal(setup.code, 0, setup.stderr)
+  assert.notEqual(serverPid, undefined, 'no preview server is running')
+  assert.equal(await readProcessColumn('pgid', serverPid), String(setup.pid))
+})
+
+test('setup fails naming the port when it is busy, and leaves the other listener and no state file', async (context) => {
+  const port = await findFreePort()
+  await holdPort(context, port, 'foreign listener')
+  const workspace = await makeWorkspace(context, port)
 
   const setup = await runHook('setup', workspace, port)
   const afterwards = await getPreview(port)
@@ -201,9 +261,9 @@ test('setup fails naming the port when it is busy, and leaves the other listener
   assert.equal(await exists(path.join(workspace, '.preview-state.json')), false)
 })
 
-test('cleanup run twice after setup exits 0 both times and closes the port', async (test) => {
+test('cleanup run twice after setup exits 0 both times and closes the port', async (context) => {
   const port = await findFreePort()
-  const workspace = await makeWorkspace(test, port)
+  const workspace = await makeWorkspace(context, port)
   const setup = await runHook('setup', workspace, port)
   assert.equal(setup.code, 0, setup.stderr)
 
@@ -215,10 +275,10 @@ test('cleanup run twice after setup exits 0 both times and closes the port', asy
   assert.equal(await isRefused(port), true)
 })
 
-test('cleanup after a failed setup exits 0 and leaves the other listener answering', async (test) => {
+test('cleanup after a failed setup exits 0 and leaves the other listener answering', async (context) => {
   const port = await findFreePort()
-  await holdPort(test, port, 'foreign listener')
-  const workspace = await makeWorkspace(test, port)
+  await holdPort(context, port, 'foreign listener')
+  const workspace = await makeWorkspace(context, port)
   await runHook('setup', workspace, port)
 
   const cleanup = await runHook('cleanup', workspace, port)
@@ -228,10 +288,25 @@ test('cleanup after a failed setup exits 0 and leaves the other listener answeri
   assert.equal(afterwards.text, 'foreign listener')
 })
 
-test('cleanup exits 0 when the workspace does not exist', async (test) => {
+test('cleanup after a crash exits 0 and leaves the other listener on the port answering', async (context) => {
   const port = await findFreePort()
-  const parent = await makeTemporaryDirectory(test)
-  await mkdir(path.join(parent, 'present'))
+  const workspace = await makeWorkspace(context, port)
+  const setup = await runHook('setup', workspace, port)
+  assert.equal(setup.code, 0, setup.stderr)
+  process.kill(await findServerPid(workspace), 'SIGKILL')
+  await waitUntilRefused(port)
+  await holdPort(context, port, 'foreign listener')
+
+  const cleanup = await runHook('cleanup', workspace, port)
+  const afterwards = await getPreview(port)
+
+  assert.equal(cleanup.code, 0, cleanup.stderr)
+  assert.equal(afterwards.text, 'foreign listener')
+})
+
+test('cleanup exits 0 when the workspace does not exist', async (context) => {
+  const port = await findFreePort()
+  const parent = await makeTemporaryDirectory(context)
 
   const cleanup = await runHook('cleanup', path.join(parent, 'missing'), port)
 
