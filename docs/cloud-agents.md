@@ -103,7 +103,8 @@ is the reference.
   allow `generativelanguage.googleapis.com` unless the level is **Full** or
   already covers it.
 - **Environment variables:** leave them empty. Add `GEMINI_API_KEY` only for a
-  manual standalone playthrough; the checks never read it.
+  manual standalone playthrough; the checks never read it. Anyone who can use
+  the environment can read its variables, `GEMINI_API_KEY` included.
 
 ### Orchestrating cloud sessions
 

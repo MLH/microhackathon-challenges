@@ -2,7 +2,7 @@
 // station's own `boothstrap dev --verify`, and rejects duplicate challenge ids.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -17,17 +17,75 @@ function compareNames(left, right) {
   return 0
 }
 
+/** Error codes for a symlink that dangles, loops, or runs through a file. */
+const BROKEN_LINK_CODES = ['ENOENT', 'ENOTDIR', 'ELOOP']
+
 /**
- * Lists the top-level directories of `root` that hold a challenge.json,
- * skipping dot-directories and node_modules. Returns `{ dir, name }` sorted by name.
+ * True when `entry` is a directory or a symlink to one, because the station
+ * keeps in-repo symlinks. A broken symlink is not a directory; see
+ * {@link findUnsafeSymlinks} for how it fails verification.
+ */
+function isDirectoryFollowingSymlinks(root, entry) {
+  try {
+    return statSync(path.join(root, entry.name)).isDirectory()
+  } catch (error) {
+    if (BROKEN_LINK_CODES.includes(error.code)) return false
+    throw error
+  }
+}
+
+/**
+ * Lists the top-level directories of `root` (symlinks to directories
+ * included) that hold a challenge.json, skipping dot-directories and
+ * node_modules. Returns `{ dir, name }` sorted by name.
  */
 export function findPackages(root) {
   return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
     .filter((entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules')
+    .filter((entry) => isDirectoryFollowingSymlinks(root, entry))
     .filter((entry) => existsSync(path.join(root, entry.name, 'challenge.json')))
     .map((entry) => ({ name: entry.name, dir: path.join(root, entry.name) }))
     .sort((left, right) => compareNames(left.name, right.name))
+}
+
+/** True when `candidate` is `parent` or lies beneath it. */
+function isInside(parent, candidate) {
+  const relative = path.relative(parent, candidate)
+
+  return !relative.startsWith('..') && !path.isAbsolute(relative)
+}
+
+/** Explains why a top-level symlink is unsafe, or returns undefined when it is fine. */
+function explainUnsafeSymlink(realRoot, linkPath) {
+  if (path.isAbsolute(readlinkSync(linkPath))) return 'has an absolute target'
+
+  let resolved
+  try {
+    resolved = realpathSync(linkPath)
+  } catch (error) {
+    if (BROKEN_LINK_CODES.includes(error.code)) return 'is dangling or loops'
+    throw error
+  }
+
+  return isInside(realRoot, resolved) ? undefined : 'points outside the repo'
+}
+
+/**
+ * Lists the top-level symlinks of `root` that the station refuses to unpack:
+ * absolute, dangling, looping, or resolving outside `root`. Returns one
+ * message per link, naming it and its target.
+ */
+export function findUnsafeSymlinks(root) {
+  const realRoot = realpathSync(root)
+
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isSymbolicLink() && entry.name !== 'node_modules')
+    .flatMap((entry) => {
+      const linkPath = path.join(root, entry.name)
+      const reason = explainUnsafeSymlink(realRoot, linkPath)
+
+      return reason === undefined ? [] : [`Unsafe symlink "${entry.name}" -> ${readlinkSync(linkPath)}: ${reason}`]
+    })
 }
 
 /**
@@ -61,14 +119,15 @@ export function findDuplicateIds(packages) {
 }
 
 /**
- * Runs the real `boothstrap dev --verify` on one package with the given
- * binary; true when it passes. A binary that cannot start is reported on
+ * Runs the real `boothstrap dev --verify` once on all the given package
+ * directories with the given binary; it reports every package, failures
+ * included. True when all pass. A binary that cannot start is reported on
  * stderr and counts as a failure.
  */
-export function verifyWithBoothstrap(packageDir, binary = boothstrapBin) {
-  const result = spawnSync(binary, ['dev', '--verify', packageDir], { stdio: 'inherit' })
+export function verifyWithBoothstrap(packageDirs, binary = boothstrapBin) {
+  const result = spawnSync(binary, ['dev', '--verify', ...packageDirs], { stdio: 'inherit' })
   if (result.error) {
-    console.error(`boothstrap not found at ${binary}; run npm ci`)
+    console.error(`could not run boothstrap at ${binary}: ${result.error.message}; run npm ci`)
 
     return false
   }
@@ -78,23 +137,26 @@ export function verifyWithBoothstrap(packageDir, binary = boothstrapBin) {
 
 /**
  * Verifies all packages under `root` and returns the process exit code:
- * 0 when every package verifies and ids are unique (or none exist), else 1.
+ * 0 when every package verifies, ids are unique and no top-level symlink is
+ * unsafe (or no packages exist), else 1.
  */
 export function main({ root = repoRoot, verify = verifyWithBoothstrap } = {}) {
+  const unsafeSymlinks = findUnsafeSymlinks(root)
+  for (const message of unsafeSymlinks) console.error(message)
+
   const packages = findPackages(root)
   if (packages.length === 0) {
     console.log('No challenge packages found.')
-    return 0
+    return unsafeSymlinks.length === 0 ? 0 : 1
   }
 
-  // Run every package so one failure doesn't hide the others.
-  const verifyResults = packages.map(({ dir }) => verify(dir))
+  const allVerified = verify(packages.map(({ dir }) => dir))
   const duplicates = findDuplicateIds(packages)
   for (const { id, names } of duplicates) {
     console.error(`Duplicate challenge id "${id}" in: ${names.join(', ')}`)
   }
 
-  return verifyResults.every(Boolean) && duplicates.length === 0 ? 0 : 1
+  return allVerified && duplicates.length === 0 && unsafeSymlinks.length === 0 ? 0 : 1
 }
 
 /** Signals a bad command line; the CLI prints its message without a stack. */

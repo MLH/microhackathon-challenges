@@ -11,8 +11,8 @@ by the same package validator stations run.
   branches.
 - **Consequential: state intent, then proceed.** Pushing a branch, opening a
   PR, adding a dependency.
-- **Irreversible: always confirm first.** Force-pushing a shared branch,
-  deleting branches or data, anything posted outside the repo.
+- **Irreversible: always confirm first.** Force-pushes, deleting branches
+  or data, anything posted outside the repo.
 
 ## Decision principles
 
@@ -47,9 +47,11 @@ by the same package validator stations run.
 - A package's dependencies install through its own `install` hook, never at
   the repo root. The root `package.json` has one devDependency,
   `@mlhacks/boothstrap`, pinned exactly; bumping it is a one-line PR.
-- A symlinked top-level directory is not a package; verify considers real
-  directories only. `npm run lint` also lints Markdown inside packages, so the
-  house Markdown rules apply there.
+- In-repo symlinks are followed: a symlinked top-level directory holding a
+  `challenge.json` is a package. A top-level symlink that is absolute,
+  dangling, looping, or points outside the repo fails verify, as the station
+  refuses it. `npm run lint` also lints Markdown inside packages, so the house
+  Markdown rules apply there.
 - `npm run verify` runs `boothstrap dev --verify` on every package. Add no rule
   the station doesn't enforce.
 - Tests run offline, with no model calls and no credentials.
@@ -73,8 +75,9 @@ by the same package validator stations run.
   that, convert it back to a draft, fix it, and mark it ready again.
 - The PR body carries no process narrative and no line-number citations.
 - Every PR lands on `main` as one squash commit, through GitHub's merge only.
-  Never push to or rewrite `main`. Update a branch by rebase, or by merging
-  `main` into it; the squash keeps history linear.
+  Never push to or rewrite `main`. Update a branch by merging `main` into
+  it, since `.claude/settings.json` denies force-pushes; the squash keeps
+  history linear.
 
 ## Project structure
 
