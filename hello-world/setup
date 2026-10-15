@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
+if [ ! -d "$workspace" ] || [ ! -w "$workspace" ]; then
+  echo "hello-world setup: workspace is missing or not writable: $workspace" >&2
+  exit 1
+fi
+
+printf 'Hello from the hello-world challenge!\n' > "$workspace/welcome.txt"

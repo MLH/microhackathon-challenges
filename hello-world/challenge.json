@@ -1,0 +1,29 @@
+{
+  "id": "hello-world",
+  "title": "Hello, World!",
+  "tagline": "Meet your AI guide and make your first file.",
+  "type": "terminal",
+  "agent": "pi",
+  "model": "google/gemini-3.8-flash",
+  "vault_services": ["gemini"],
+  "icon": "prompt",
+  "points": 50,
+  "estimated_minutes": 5,
+  "learning_objectives": ["AI-assisted file creation"],
+  "featured_tech": ["Pi", "Gemini"],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "greet",
+      "title": "Meet your guide",
+      "hint": "Ask Pi to read welcome.txt and say hello.",
+      "done_when": "Pi has read welcome.txt in the workspace and greeted the participant."
+    },
+    {
+      "id": "hello-file",
+      "title": "Make your first file",
+      "hint": "Ask Pi to create hello.txt with the words Hello, world!",
+      "done_when": "hello.txt exists in the workspace and contains the text Hello, world!"
+    }
+  ]
+}
