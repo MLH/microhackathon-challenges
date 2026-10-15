@@ -272,6 +272,27 @@ test('the preview adds the reload script before the last </body>, leaving one in
   assert.match(app.text, /<\/script><\/body>$/)
 })
 
+const reloadPlacementCases = [
+  { name: 'an uppercase </BODY>', page: '<BODY>app</BODY>', served: /^<BODY>app<script>new EventSource.*<\/script><\/BODY>$/ },
+  { name: 'a </body > with a space', page: '<body>app</body >', served: /^<body>app<script>new EventSource.*<\/script><\/body >$/ },
+  { name: 'a wide-lowercasing character before </body>', page: '<body>İ</body>', served: /^<body>İ<script>new EventSource.*<\/script><\/body>$/ },
+  { name: 'no </body> at all', page: '<p>app</p>', served: /^<p>app<\/p><script>new EventSource.*<\/script>$/ },
+]
+
+for (const { name, page, served } of reloadPlacementCases) {
+  test(`the preview places the reload script correctly for ${name}`, async (context) => {
+    const port = await findFreePort()
+    const workspace = await makeWorkspace(context, port)
+    const setup = await runHook('setup', workspace, port)
+    assert.equal(setup.code, 0, setup.stderr)
+    await writeFile(path.join(workspace, 'index.html'), page)
+
+    const app = await getPreview(port)
+
+    assert.match(app.text, served)
+  })
+}
+
 test('the preview refuses a hard-linked index.html', async (context) => {
   const port = await findFreePort()
   const workspace = await makeWorkspace(context, port)

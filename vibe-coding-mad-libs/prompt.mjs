@@ -62,7 +62,10 @@ export function hasUnfilledBlank(text) {
   return UNFILLED_BLANK.test(text)
 }
 
-/** True when `text` is the whole sentence with all four blanks filled, ending in `.`, `!`, or nothing. */
+/**
+ * True when `text` is the whole sentence with all four blanks filled, ending
+ * in `.`, `!`, or nothing.
+ */
 export function isFinishedPrompt(text) {
   const match = FINISHED_SENTENCE.exec(text.trim())
   if (!match) return false

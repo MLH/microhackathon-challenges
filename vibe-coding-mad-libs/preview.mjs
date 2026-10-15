@@ -100,10 +100,10 @@ function readApp(workspace) {
  * last `</body>`, so a `</body>` inside the page's own script stays intact.
  */
 function sendPage(response, page) {
-  const closingBodyAt = page.toLowerCase().lastIndexOf('</body')
-  const withReload = closingBodyAt === -1
+  const closingBody = page.matchAll(/<\/body\s*>/gi).toArray().at(-1)
+  const withReload = closingBody === undefined
     ? page + RELOAD_SCRIPT
-    : page.slice(0, closingBodyAt) + RELOAD_SCRIPT + page.slice(closingBodyAt)
+    : page.slice(0, closingBody.index) + RELOAD_SCRIPT + page.slice(closingBody.index)
   response.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-security-policy': CONTENT_SECURITY_POLICY,
