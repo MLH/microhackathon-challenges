@@ -61,8 +61,7 @@ async function cleanUp(environment) {
 
 try {
   await cleanUp(process.env)
-  process.exit(0)
 } catch (error) {
   console.error(`birdsbirdbirds cleanup: ${error.stack}`)
-  process.exit(1)
+  process.exitCode = 1
 }

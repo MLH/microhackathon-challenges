@@ -8,13 +8,13 @@
 // Exits with code 3 when the port is busy.
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { realpathSync } from 'node:fs'
 import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
 
-import { loadBirdFile } from './check-bird.mjs'
+import { isRunDirectly, loadBirdFile } from './check-bird.mjs'
+import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const DEFAULT_PORT = 4322
 export const MAX_PNG_BYTES = 2 * 1024 * 1024
@@ -101,13 +101,17 @@ async function sendStaticFile(response, { file, contentType }) {
   send(response, 200, contentType, body)
 }
 
-/** Sends <workspace>/bird.png, or 404 when it isn't saved yet. */
-async function sendSavedBird(response, workspace) {
+/**
+ * Sends <workspace>/bird.png: 404 when it isn't saved yet, 422 when it is a
+ * symlink, pipe, or anything but a regular file of at most MAX_PNG_BYTES.
+ */
+function sendSavedBird(response, workspace) {
   let body
   try {
-    body = await readFile(path.join(workspace, 'bird.png'))
+    body = readWorkspaceFile(path.join(workspace, 'bird.png'), MAX_PNG_BYTES)
   } catch (error) {
     if (error.code === 'ENOENT') return sendText(response, 404, 'no bird.png yet')
+    if (error instanceof RefusedFileError) return sendText(response, 422, `${error.message}; press Save on the drawing page again`)
     throw error
   }
 
@@ -240,18 +244,29 @@ function sendJson(response, status, value) {
   send(response, status, 'application/json; charset=utf-8', JSON.stringify(value))
 }
 
+/**
+ * Reads BIRDSBIRDBIRDS_PORT from `environment`, defaulting to DEFAULT_PORT.
+ * Throws an Error with a message fit to show as is when it isn't a port number.
+ */
+export function portFromEnvironment(environment) {
+  const portText = environment.BIRDSBIRDBIRDS_PORT ?? String(DEFAULT_PORT)
+  const port = Number(portText)
+  if (!/^\d+$/.test(portText) || port < 1 || port > 65535) {
+    throw new Error(`BIRDSBIRDBIRDS_PORT must be a port number from 1 to 65535, got ${JSON.stringify(portText)}`)
+  }
+
+  return port
+}
+
 /** Reads the server settings from the environment, failing with a clear message when one is missing or malformed. */
 function readSettings(environment) {
   const workspace = environment.BIRDSBIRDBIRDS_WORKSPACE
   const token = environment.BIRDSBIRDBIRDS_TOKEN
-  const portText = environment.BIRDSBIRDBIRDS_PORT ?? String(DEFAULT_PORT)
-  const port = Number(portText)
 
   if (workspace === undefined || !path.isAbsolute(workspace)) throw new Error('BIRDSBIRDBIRDS_WORKSPACE must be set to an absolute path')
   if (token === undefined || token === '') throw new Error('BIRDSBIRDBIRDS_TOKEN must be set')
-  if (!/^\d+$/.test(portText) || port < 1 || port > 65535) throw new Error(`BIRDSBIRDBIRDS_PORT must be a port number from 1 to 65535, got ${JSON.stringify(portText)}`)
 
-  return { workspace, token, port }
+  return { workspace, token, port: portFromEnvironment(environment) }
 }
 
 /** Starts the server from the environment; exits 3 when the port is busy and 1 on any other startup failure. */
@@ -278,14 +293,4 @@ export function main(environment) {
   server.listen(port, LISTEN_HOST, () => console.log(`birdsbirdbirds server: serving ${workspace} at http://${LISTEN_HOST}:${port}/`))
 }
 
-/** True when this module is the script node was asked to run, symlinks resolved. */
-function isRunDirectly() {
-  if (process.argv[1] === undefined) return false
-  try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
-  } catch {
-    return false
-  }
-}
-
-if (isRunDirectly()) main(process.env)
+if (isRunDirectly(import.meta.url)) main(process.env)

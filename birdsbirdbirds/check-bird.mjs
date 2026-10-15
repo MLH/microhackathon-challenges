@@ -7,8 +7,10 @@
 // allowlist of properties, transform functions, and units, so nothing else
 // can reach the page's stylesheet.
 
-import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs'
+import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
+
+import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const MAX_BIRD_FILE_BYTES = 8192
 export const MAX_KEYFRAMES_BYTES = 4096
@@ -22,23 +24,43 @@ const ENTRY_KEYS = ['bird_name', 'origin', 'animation']
 const ANIMATION_KEYS = ['css_keyframes', 'animation_name', 'duration', 'timing_function']
 const ALLOWED_PROPERTIES = ['transform', 'opacity', 'animation-timing-function']
 const TIMING_KEYWORDS = ['linear', 'ease', 'ease-in', 'ease-out', 'ease-in-out']
-const ALLOWED_UNITS = ['vw', 'vh', 'px', '%', 'deg', 'turn', 'em', 'rem']
-const RESERVED_ANIMATION_NAMES = ['none', 'initial', 'inherit', 'unset', 'revert', 'revert-layer', 'default']
 
-/** Argument counts each allowed transform function takes, as [minimum, maximum]. */
-const TRANSFORM_ARITY = {
-  translate: [1, 2],
-  translateX: [1, 1],
-  translateY: [1, 1],
-  translate3d: [3, 3],
-  rotate: [1, 1],
-  rotateZ: [1, 1],
-  scale: [1, 2],
-  scaleX: [1, 1],
-  scaleY: [1, 1],
-  skew: [1, 2],
-  skewX: [1, 1],
-  skewY: [1, 1],
+/**
+ * What each kind of transform argument accepts, and the error for anything
+ * else. Only 0 may go bare where a unit is required, as in CSS itself.
+ */
+const ARGUMENT_KINDS = {
+  length: {
+    units: ['vw', 'vh', 'px', 'em', 'rem', '%'],
+    bareZero: true,
+    problem: (call, argument) => `${call} needs a length unit (vw, vh, px, em, rem, or %) on ${argument.text}; only 0 may go without one`,
+  },
+  angle: {
+    units: ['deg', 'turn'],
+    bareZero: true,
+    problem: (call, argument) => `${call} needs an angle unit (deg or turn); write ${argument.value}deg`,
+  },
+  number: {
+    units: [''],
+    bareZero: false,
+    problem: (call, argument) => `${call} takes plain numbers with no unit; write ${argument.value}`,
+  },
+}
+
+/** Each allowed transform function: its argument count as [minimum, maximum], and the kind of argument it takes. */
+const TRANSFORM_FUNCTIONS = {
+  translate: { arity: [1, 2], kind: ARGUMENT_KINDS.length },
+  translateX: { arity: [1, 1], kind: ARGUMENT_KINDS.length },
+  translateY: { arity: [1, 1], kind: ARGUMENT_KINDS.length },
+  translate3d: { arity: [3, 3], kind: ARGUMENT_KINDS.length },
+  rotate: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
+  rotateZ: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
+  scale: { arity: [1, 2], kind: ARGUMENT_KINDS.number },
+  scaleX: { arity: [1, 1], kind: ARGUMENT_KINDS.number },
+  scaleY: { arity: [1, 1], kind: ARGUMENT_KINDS.number },
+  skew: { arity: [1, 2], kind: ARGUMENT_KINDS.angle },
+  skewX: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
+  skewY: { arity: [1, 1], kind: ARGUMENT_KINDS.angle },
 }
 
 /** Raw substrings rejected before tokenizing, each with the fix Pi should make. */
@@ -52,9 +74,13 @@ const FORBIDDEN_TEXT = [
   { pattern: /!\s*important/i, message: '"!important" is not allowed and does nothing in keyframes; remove it' },
 ]
 
-const ANIMATION_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
+const ANIMATION_NAME_PATTERN = /^fly_[A-Za-z0-9_-]{1,60}$/
 const DURATION_PATTERN = /^\d+(\.\d+)?s$/
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
+const INVISIBLE_CHARACTER_PATTERN = /[\p{Cf}\p{Zl}\p{Zp}]/u
+const VISIBLE_CHARACTER_PATTERN = /[\p{L}\p{N}\p{S}\p{P}]/u
+const STACKED_MARKS_PATTERN = /\p{M}{3,}/u
+const MAX_STACKED_MARKS = 2
 const KEYFRAMES_FIELD = 'animation.css_keyframes'
 const PUNCTUATION = new Set(['{', '}', ':', ';', ',', ')'])
 const WHITESPACE = new Set([' ', '\t', '\n', '\r', '\f'])
@@ -83,14 +109,14 @@ export function checkBird(entry) {
 }
 
 /**
- * Reads and checks a bird.json file, reading at most MAX_BIRD_FILE_BYTES + 1
- * bytes. Returns `{ entry, errors }`; `entry` is undefined when the file could
- * not be read or parsed.
+ * Reads and checks a bird.json file: a regular file (never a symlink or pipe)
+ * of at most MAX_BIRD_FILE_BYTES. Returns `{ entry, errors }`; `entry` is
+ * undefined when the file could not be read or parsed.
  */
 export function loadBirdFile(filePath) {
   let text
   try {
-    text = readCappedFile(filePath)
+    text = readBirdText(filePath)
   } catch (error) {
     if (error instanceof CheckError) return { entry: undefined, errors: [error.message] }
     return { entry: undefined, errors: [`${filePath}: cannot read the file (${error.code ?? error.message}); write bird.json in the workspace, then run the checker again`] }
@@ -100,30 +126,38 @@ export function loadBirdFile(filePath) {
   try {
     entry = JSON.parse(text)
   } catch (error) {
-    return { entry: undefined, errors: [`${filePath}: not valid JSON (${error.message}); rewrite it as one JSON object`] }
+    return { entry: undefined, errors: [`${filePath}: ${describeJsonError(error)}; rewrite it as one JSON object`] }
   }
 
   return { entry, errors: checkBird(entry) }
 }
 
-/** Reads a file as UTF-8, failing with an actionable message when it is over the byte cap. */
-function readCappedFile(filePath) {
-  const descriptor = openSync(filePath, 'r')
+/** Reads bird.json as UTF-8, failing with an actionable CheckError when it is refused or not UTF-8. */
+function readBirdText(filePath) {
+  let bytes
   try {
-    const buffer = Buffer.alloc(MAX_BIRD_FILE_BYTES + 1)
-    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0)
-    if (bytesRead > MAX_BIRD_FILE_BYTES) {
-      const size = fstatSync(descriptor).size
-      throw new CheckError(`${filePath}: file is ${size} bytes, over the ${MAX_BIRD_FILE_BYTES}-byte cap; use fewer keyframes and shorter names`)
-    }
-
-    return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead))
+    bytes = readWorkspaceFile(filePath, MAX_BIRD_FILE_BYTES)
   } catch (error) {
-    if (error instanceof TypeError) throw new CheckError(`${filePath}: is not valid UTF-8; save it as UTF-8 text`)
-    throw error
-  } finally {
-    closeSync(descriptor)
+    if (!(error instanceof RefusedFileError)) throw error
+    const fix = error.tooLarge ? 'use fewer keyframes and shorter names' : 'write bird.json as a plain file with the write tool'
+    throw new CheckError(`${error.message}; ${fix}`)
   }
+
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+  } catch {
+    throw new CheckError(`${filePath}: is not valid UTF-8; save it as UTF-8 text`)
+  }
+}
+
+/**
+ * Says where JSON.parse failed without echoing the file: V8's own message
+ * quotes the text, which may not be bird.json's at all.
+ */
+function describeJsonError(error) {
+  const position = /at position (\d+)/.exec(error.message)?.[1]
+
+  return position === undefined ? 'not valid JSON' : `not valid JSON at position ${position}`
 }
 
 /** True for a non-null, non-array object. */
@@ -148,6 +182,13 @@ function labelErrors(entry, key, maxLength, meaning) {
   if (typeof value !== 'string') return [`${key} must be a string holding ${meaning}`]
   if (value.trim() === '') return [`${key} is empty; give ${meaning}`]
   if (CONTROL_CHARACTER_PATTERN.test(value)) return [`${key} contains a control character such as a newline or tab; use plain text on one line`]
+
+  const invisible = INVISIBLE_CHARACTER_PATTERN.exec(value)?.[0]
+  if (invisible !== undefined) return [`${key} contains the invisible character ${codePointName(invisible)}; use plain visible text`]
+  if (!VISIBLE_CHARACTER_PATTERN.test(value)) return [`${key} has no visible letters, digits, or symbols; give ${meaning}`]
+
+  const stackedMarks = STACKED_MARKS_PATTERN.exec(value)?.[0]
+  if (stackedMarks !== undefined) return [`${key} stacks ${[...stackedMarks].length} accent marks on one letter; use at most ${MAX_STACKED_MARKS}`]
 
   const length = [...value].length
   if (length > maxLength) return [`${key} is ${length} characters, over the ${maxLength}-character limit; shorten it`]
@@ -175,13 +216,13 @@ function animationErrors(animation) {
   ]
 }
 
-/** Checks animation_name is a safe, non-reserved CSS identifier. */
+/**
+ * Checks animation_name starts with fly_, which keeps it clear of CSS keywords
+ * and of the page's own keyframes such as flap.
+ */
 function animationNameErrors(name) {
   if (!ANIMATION_NAME_PATTERN.test(name)) {
-    return [`animation.animation_name ${quote(name)} is not allowed; use a letter or _ then up to 63 letters, digits, _ or -, e.g. "fly_robin"`]
-  }
-  if (RESERVED_ANIMATION_NAMES.includes(name.toLowerCase())) {
-    return [`animation.animation_name ${quote(name)} is a reserved CSS word; pick a unique name such as "fly_robin"`]
+    return [`animation.animation_name ${quote(name)} is not allowed; start it with fly_ and follow with 1 to 60 letters, digits, _ or -, e.g. "fly_robin"`]
   }
 
   return []
@@ -288,6 +329,9 @@ function tokenize(source, field) {
         index += 1
         while (isDigit(source[index])) index += 1
       }
+      if ((source[index] === 'e' || source[index] === 'E') && startsExponent(source, index + 1)) {
+        throw new CheckError(`${field}: exponents aren't allowed (found ${quote(readExponentText(source, start, index + 1))}); write plain numbers like 1000px`)
+      }
       const value = Number(source.slice(start, index))
       let unit = ''
       if (source[index] === '%') {
@@ -301,7 +345,7 @@ function tokenize(source, field) {
       tokens.push({ type: 'number', value, unit, text: source.slice(start, index) })
     } else {
       const name = readIdentifier()
-      if (name === '') throw new CheckError(`${field}: unexpected character ${quote(character)} (U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}); use only letters, digits, spaces and { } : ; , ( ) . % -`)
+      if (name === '') throw new CheckError(`${field}: unexpected character ${quote(character)} (${codePointName(character)}); use only letters, digits, spaces and { } : ; , ( ) . % -`)
       if (source[index] === '(') {
         index += 1
         tokens.push({ type: 'function', value: name })
@@ -324,6 +368,22 @@ function startsNumber(source, index) {
   }
 
   return false
+}
+
+/** True when an exponent's digits, with an optional sign, start at `index`. */
+function startsExponent(source, index) {
+  const character = source[index]
+
+  return isDigit(character) || ((character === '+' || character === '-') && isDigit(source[index + 1]))
+}
+
+/** The text of a number with an exponent, from `start` through the exponent's digits after `exponentIndex`. */
+function readExponentText(source, start, exponentIndex) {
+  let end = exponentIndex
+  if (source[end] === '+' || source[end] === '-') end += 1
+  while (isDigit(source[end])) end += 1
+
+  return source.slice(start, end)
 }
 
 /** True for an ASCII digit. */
@@ -369,8 +429,11 @@ function parseKeyframes(tokens, animationName) {
   }
 
   let position = 0
+  /** The token at the cursor, without moving it. */
   const peek = () => tokens[position]
+  /** The token at the cursor, moving the cursor past it. */
   const next = () => tokens[position++]
+  /** Takes the next token, failing unless it is `type`; `context` says where in the rule it was expected. */
   const expect = (type, context) => {
     const token = next()
     if (token?.type !== type) throw keyframesError(`expected "${type}" ${context} but found ${describe(token)}`)
@@ -472,29 +535,39 @@ function parseDeclaration(tokens, position) {
   return end
 }
 
-/** Fails unless the value is `none` or allowed transform functions with numeric arguments. */
+/**
+ * Fails unless the value is `none` or allowed transform functions, each with
+ * the right number of arguments in the units its kind takes.
+ */
 function checkTransformValue(value) {
   if (value.length === 1 && value[0].type === 'ident' && value[0].value === 'none') return
 
   let position = 0
   while (position < value.length) {
     const transformFunction = value[position]
-    if (transformFunction.type !== 'function' || !Object.hasOwn(TRANSFORM_ARITY, transformFunction.value)) {
-      throw keyframesError(`transform ${describe(transformFunction)} is not allowed; use none or these functions: ${Object.keys(TRANSFORM_ARITY).join(', ')}`)
+    if (transformFunction.type !== 'function' || !Object.hasOwn(TRANSFORM_FUNCTIONS, transformFunction.value)) {
+      throw keyframesError(`transform ${describe(transformFunction)} is not allowed; use none or these functions: ${Object.keys(TRANSFORM_FUNCTIONS).join(', ')}`)
     }
-    const { argumentTokens, next } = readArguments(value, position + 1, `transform ${transformFunction.value}(`)
-    const [minimum, maximum] = TRANSFORM_ARITY[transformFunction.value]
+    const { argumentTokens, next } = readArguments(value, position + 1, `${KEYFRAMES_FIELD}: transform ${transformFunction.value}(`)
+    const { arity: [minimum, maximum], kind } = TRANSFORM_FUNCTIONS[transformFunction.value]
     if (argumentTokens.length < minimum || argumentTokens.length > maximum) {
       const expected = minimum === maximum ? `${minimum}` : `${minimum} or ${maximum}`
       throw keyframesError(`transform ${transformFunction.value}() takes ${expected} argument${maximum === 1 ? '' : 's'} but got ${argumentTokens.length}`)
     }
-    for (const argument of argumentTokens) {
-      if (argument.unit !== '' && !ALLOWED_UNITS.includes(argument.unit)) {
-        throw keyframesError(`unit in ${describe(argument)} is not allowed in transform ${transformFunction.value}(); use ${ALLOWED_UNITS.join(', ')}, or a plain number`)
-      }
+    const misfit = argumentTokens.find((argument) => !fitsKind(argument, kind))
+    if (misfit !== undefined) {
+      const call = `${transformFunction.value}(${argumentTokens.map((argument) => argument.text).join(', ')})`
+      throw keyframesError(kind.problem(call, misfit))
     }
     position = next
   }
+}
+
+/** True when a number token has one of the kind's units, or is a bare 0 where the kind allows it. */
+function fitsKind(argument, kind) {
+  if (kind.units.includes(argument.unit)) return true
+
+  return kind.bareZero && argument.unit === '' && argument.value === 0
 }
 
 /** Reads comma-separated number arguments up to ")" starting at `position`. Returns them and the position after ")". */
@@ -528,7 +601,10 @@ function checkOpacityValue(value) {
 function checkTimingValue(value, field) {
   const allowed = `use ${TIMING_KEYWORDS.join(', ')}, or cubic-bezier(x1, y1, x2, y2) with plain numbers`
   const [first] = value
-  if (value.length === 1 && first.type === 'ident' && TIMING_KEYWORDS.includes(first.value)) return
+  if (first?.type === 'ident' && TIMING_KEYWORDS.includes(first.value)) {
+    if (value.length === 1) return
+    throw new CheckError(`${field} has extra text after ${describe(first)}; use one timing function on its own`)
+  }
   if (first?.type !== 'function' || first.value !== 'cubic-bezier') {
     throw new CheckError(`${field} ${first === undefined ? 'is empty' : `${describe(first)} is not allowed`}; ${allowed}`)
   }
@@ -548,6 +624,11 @@ function checkTimingValue(value, field) {
   if ([argumentTokens[0], argumentTokens[2]].some((argument) => argument.value < 0 || argument.value > 1)) {
     throw new CheckError(`${field} cubic-bezier() x values (the 1st and 3rd numbers) must be from 0 to 1`)
   }
+}
+
+/** Names a character by its code point, such as U+202E. */
+function codePointName(character) {
+  return `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`
 }
 
 /** Quotes a value for a message, shortened so a long input never floods the output. */
@@ -571,14 +652,14 @@ export function main(argv) {
   return 0
 }
 
-/** True when this module is the script node was asked to run, symlinks resolved. */
-function isRunDirectly() {
+/** True when the module at `moduleUrl` (its import.meta.url) is the script node was asked to run, symlinks resolved. */
+export function isRunDirectly(moduleUrl) {
   if (process.argv[1] === undefined) return false
   try {
-    return import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
+    return moduleUrl === pathToFileURL(realpathSync(process.argv[1])).href
   } catch {
     return false
   }
 }
 
-if (isRunDirectly()) process.exitCode = main(process.argv.slice(2))
+if (isRunDirectly(import.meta.url)) process.exitCode = main(process.argv.slice(2))

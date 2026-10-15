@@ -13,17 +13,20 @@ Check whether `report_step` is one of your tools. When it's missing (a
 standalone run), don't call it, and skip the gallery at the end: after each
 step, tell the participant which step they just finished and move on.
 
-The package directory is the one holding `skills/`, two directories up from
-this file. With boothstrap it is `$BOOTHSTRAP_PACKAGE_DIR`; without it, work
-it out from this skill file's path. The checker is
-`"$BOOTHSTRAP_PACKAGE_DIR/check-bird.mjs"`, or `check-bird.mjs` in the
-package directory when the variable is unset. Run it with `node`.
+The checker is `check-bird.mjs` in the package directory; run it with
+`node`. With boothstrap it is `"$BOOTHSTRAP_PACKAGE_DIR/check-bird.mjs"`.
+When `BOOTHSTRAP_PACKAGE_DIR` is unset, it sits two directories above the
+folder holding this SKILL.md: replace `skills/start-challenge/SKILL.md` at
+the end of this file's path with `check-bird.mjs`. For example,
+`/home/me/birdsbirdbirds/skills/start-challenge/SKILL.md` gives
+`/home/me/birdsbirdbirds/check-bird.mjs`.
 
 ## 1. Draw
 
-Tell the participant a drawing page is ready at `http://127.0.0.1:4322/` and
-ask if they'd like it open. On yes, call `show_preview` with that URL. Without
-`show_preview`, give them the URL to open.
+With `show_preview`, tell the participant a drawing page is ready and ask if
+they'd like it open; on yes, call `show_preview` with
+`http://127.0.0.1:4322/`. Without `show_preview`, just give them that URL to
+open.
 
 Tell them to draw any bird, then press Save. Once they say they're done, use
 `bash` to check that `bird.png` exists in the current directory. If it
@@ -32,8 +35,16 @@ doesn't, ask them to press Save and look again. When it exists, report
 
 ## 2. Meet the bird
 
-Use `read` on `bird.png` and say, in a sentence, what you see. Then ask three
-things, one at a time:
+Use `read` on `bird.png` and say, in a sentence, what you see. `bird.png` has
+a transparent background; if it looks blank or dark, ask the participant what
+they drew rather than guessing.
+
+Check the drawing as soon as you read it, and each answer as it comes. If the
+drawing, the name, or the origin is offensive, inappropriate, or NSFW,
+decline kindly right then, don't write `bird.json`, and ask for a
+family-friendly bird or text. Birds can be shown publicly.
+
+Then ask three things, one at a time:
 
 1. What is the bird's name?
 2. Where is it flying in from?
@@ -41,12 +52,8 @@ things, one at a time:
 
 ## 3. Animate
 
-Safety first. If the drawing, name, or origin is offensive, inappropriate, or
-NSFW, decline kindly, don't write `bird.json`, and ask for a family-friendly
-bird or text. Birds can be shown publicly.
-
-Otherwise use `write` to create `bird.json` in the current directory with
-exactly these keys and no others:
+Use `write` to create `bird.json` in the current directory with exactly these
+keys and no others:
 
 ```json
 {
@@ -64,11 +71,14 @@ exactly these keys and no others:
 That example is only the shape. Don't copy its flight; invent a unique one
 for this bird:
 
-- `animation_name` is unique and matches the name after `@keyframes`.
+- `animation_name` starts with `fly_`, is unique, and matches the name after
+  `@keyframes`.
 - Start at `translate(-20vw, Y)` and end at `translate(120vw, Y)`, where Y is
   between 10vh and 60vh, so the bird and its name stay on screen.
 - Use at least 5 keyframe percentages (for example 0%, 20%, 50%, 80%, 100%)
   with varying heights and `rotate(...)` angles.
+- Give `translate` lengths in `vw` or `vh`, `rotate` angles in `deg`, and
+  `scale` plain numbers.
 - Pick a flight character that fits the bird and what the participant asked.
 - `duration` is between 2s and 60s. The sky page plays it three times slower.
 - Only `transform`, `opacity`, and `animation-timing-function` are allowed
@@ -101,6 +111,7 @@ On a yes, call `publish_gallery_item` with:
 - `title`: `<bird_name> from <origin>`
 - `renderer`: `birds-v1`
 - `files`: `["bird.png"]`
-- `payload`: the contents of `bird.json`, as an object
+- `payload`: Run the checker once more, then `read` bird.json and pass
+  exactly that object as `payload`.
 
 On a no, move on without publishing.

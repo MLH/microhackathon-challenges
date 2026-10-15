@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict'
 import { execFile, spawnSync } from 'node:child_process'
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
@@ -94,7 +94,13 @@ const birdEntry = ({ animation = {}, ...overrides } = {}) => ({
 const birdWithKeyframes = (css) => birdEntry({ animation: { css_keyframes: css } })
 
 /** Runs check-bird.mjs as a child process from `cwd` with the given arguments. */
-const runChecker = (args, cwd) => spawnSync(process.execPath, [checkerScript, ...args], { cwd, encoding: 'utf8' })
+const runChecker = (args, cwd) => spawnSync(process.execPath, [checkerScript, ...args], { cwd, encoding: 'utf8', timeout: 10_000 })
+
+/** Makes a named pipe at `filePath`; opening it for reading blocks until a writer appears. */
+const makeFifo = (filePath) => {
+  const result = spawnSync('mkfifo', [filePath], { encoding: 'utf8' })
+  if (result.status !== 0) throw new Error(`mkfifo ${filePath} failed: ${result.stderr}`)
+}
 
 /** Makes a fresh temporary directory, runs `body` with it, and removes it afterwards. */
 const withTemporaryDirectory = async (body) => {
@@ -195,6 +201,76 @@ const REJECTED_BIRDS = [
     entry: birdEntry({ animation: { timing_function: 'steps(4)' } }),
     mentions: /animation.timing_function "steps\(" is not allowed; use linear/,
   },
+  {
+    behavior: 'rejects a rotate() angle given as a length',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: rotate(5px); } }'),
+    mentions: /css_keyframes: rotate\(5px\) needs an angle unit \(deg or turn\); write 5deg/,
+  },
+  {
+    behavior: 'rejects a rotate() angle with no unit',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: rotate(5); } }'),
+    mentions: /css_keyframes: rotate\(5\) needs an angle unit \(deg or turn\); write 5deg/,
+  },
+  {
+    behavior: 'rejects translate() lengths with no unit',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(5, 2); } }'),
+    mentions: /css_keyframes: translate\(5, 2\) needs a length unit \(vw, vh, px, em, rem, or %\) on 5/,
+  },
+  {
+    behavior: 'rejects a scale() factor with a unit',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: scale(1.2px); } }'),
+    mentions: /css_keyframes: scale\(1.2px\) takes plain numbers with no unit; write 1.2/,
+  },
+  {
+    behavior: 'rejects a skew() angle given as a length',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: skew(10vw); } }'),
+    mentions: /css_keyframes: skew\(10vw\) needs an angle unit \(deg or turn\); write 10deg/,
+  },
+  {
+    behavior: 'rejects an animation name that could collide with the page\'s own flap keyframes',
+    entry: birdEntry({ animation: { animation_name: 'flap', css_keyframes: '@keyframes flap { 0% { transform: none; } }' } }),
+    mentions: /animation.animation_name "flap" is not allowed; start it with fly_/,
+  },
+  {
+    behavior: 'rejects a bidi override in the bird name',
+    entry: birdEntry({ bird_name: 'Robin\u202Enivor' }),
+    mentions: /bird_name contains the invisible character U\+202E; use plain visible text/,
+  },
+  {
+    behavior: 'rejects a bird name that is only a zero-width space',
+    entry: birdEntry({ bird_name: '\u200B' }),
+    mentions: /bird_name contains the invisible character U\+200B; use plain visible text/,
+  },
+  {
+    behavior: 'rejects a line separator in the origin',
+    entry: birdEntry({ origin: 'Durham\u2028NC' }),
+    mentions: /origin contains the invisible character U\+2028; use plain visible text/,
+  },
+  {
+    behavior: 'rejects accent marks stacked on one letter',
+    entry: birdEntry({ bird_name: 'Ro\u0301\u0302\u0303bin' }),
+    mentions: /bird_name stacks 3 accent marks on one letter; use at most 2/,
+  },
+  {
+    behavior: 'rejects a bird name with no visible letters, digits, or symbols',
+    entry: birdEntry({ bird_name: '\u0301' }),
+    mentions: /bird_name has no visible letters, digits, or symbols; give the bird's name/,
+  },
+  {
+    behavior: 'rejects a number written with an exponent',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(1e3px, 0); } }'),
+    mentions: /^animation\.css_keyframes: exponents aren't allowed \(found "1e3"\); write plain numbers like 1000px$/,
+  },
+  {
+    behavior: 'rejects a timing function followed by more text',
+    entry: birdEntry({ animation: { timing_function: 'linear, ease' } }),
+    mentions: /^animation\.timing_function has extra text after "linear"; use one timing function on its own/,
+  },
+  {
+    behavior: 'rejects transform arguments missing a comma, naming css_keyframes',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(10vw 40vh); } }'),
+    mentions: /^animation\.css_keyframes: transform translate\( arguments must be separated by ","/,
+  },
 ]
 
 for (const { behavior, entry, mentions } of REJECTED_BIRDS) {
@@ -235,6 +311,26 @@ test('the checker CLI fails a file over the byte cap without parsing it', () => 
   assert.match(result.stderr, new RegExp(`over the ${MAX_BIRD_FILE_BYTES}-byte cap`))
 }))
 
+test('the checker CLI reports invalid JSON without echoing the file', () => withTemporaryDirectory(async (workspace) => {
+  const birdFile = path.join(workspace, 'bird.json')
+  await writeFile(birdFile, 'top-secret-line')
+
+  const result = runChecker([birdFile], workspace)
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /not valid JSON/)
+  assert.ok(!result.stderr.includes('top-secret'), result.stderr)
+}))
+
+test('the checker CLI refuses a named pipe as bird.json instead of waiting on it', () => withTemporaryDirectory(async (workspace) => {
+  makeFifo(path.join(workspace, 'bird.json'))
+
+  const result = runChecker([], workspace)
+
+  assert.equal(result.status, 1, `signal ${result.signal}`)
+  assert.match(result.stderr, /bird.json is not a regular file/)
+}))
+
 const SERVER_TOKEN = 'test-token'
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
@@ -262,10 +358,10 @@ const TINY_PNG = (() => {
 })()
 
 /** Starts a page server for `workspace` on a free loopback port, closed when the test ends; resolves its port. */
-const startBirdServer = async (t, workspace) => {
+const startBirdServer = async (testContext, workspace) => {
   const server = createBirdServer({ workspace, token: SERVER_TOKEN })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
-  t.after(() => {
+  testContext.after(() => {
     server.closeAllConnections()
     server.close()
   })
@@ -307,8 +403,8 @@ const withWorkspace = (body) => withTemporaryDirectory(async (directory) => {
   return body({ directory, workspace })
 })
 
-test('the server saves a PNG upload as bird.png and writes nothing else', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server saves a PNG upload as bird.png and writes nothing else', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
 
   const response = await postBird({ port, headers: { origin: `http://127.0.0.1:${port}` } })
 
@@ -317,8 +413,8 @@ test('the server saves a PNG upload as bird.png and writes nothing else', (t) =>
   assert.deepEqual(await readdir(workspace), ['bird.png'])
 }))
 
-test('the server refuses a body over the cap with 413 and saves nothing', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server refuses a body over the cap with 413 and saves nothing', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
   const oversized = Buffer.concat([TINY_PNG, Buffer.alloc(MAX_PNG_BYTES)])
 
   const response = await postBird({ port, body: oversized })
@@ -327,8 +423,8 @@ test('the server refuses a body over the cap with 413 and saves nothing', (t) =>
   assert.deepEqual(await readdir(workspace), [])
 }))
 
-test('the server refuses a streamed body once it passes the cap, with no Content-Length', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server refuses a streamed body once it passes the cap, with no Content-Length', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
   const oversized = Buffer.concat([TINY_PNG, Buffer.alloc(MAX_PNG_BYTES)])
 
   const response = await sendRequest({ port, method: 'POST', requestPath: '/bird.png', headers: { 'content-type': 'image/png', 'transfer-encoding': 'chunked' }, body: oversized })
@@ -349,8 +445,8 @@ const REFUSED_UPLOADS = [
 ]
 
 for (const { behavior, upload, status } of REFUSED_UPLOADS) {
-  test(`the server refuses ${behavior} and writes nothing`, (t) => withWorkspace(async ({ directory, workspace }) => {
-    const port = await startBirdServer(t, workspace)
+  test(`the server refuses ${behavior} and writes nothing`, (testContext) => withWorkspace(async ({ directory, workspace }) => {
+    const port = await startBirdServer(testContext, workspace)
 
     const response = await postBird({ port, ...upload })
 
@@ -360,16 +456,16 @@ for (const { behavior, upload, status } of REFUSED_UPLOADS) {
   }))
 }
 
-test('the server answers 404 for bird.json before Pi writes it', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server answers 404 for bird.json before Pi writes it', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
 
   const response = await sendRequest({ port, requestPath: '/bird.json' })
 
   assert.equal(response.status, 404)
 }))
 
-test('the server serves a bird.json that passes the checker', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server serves a bird.json that passes the checker', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
   await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(GALLERY_BIRDS[0]))
 
   const response = await sendRequest({ port, requestPath: '/bird.json' })
@@ -378,8 +474,8 @@ test('the server serves a bird.json that passes the checker', (t) => withWorkspa
   assert.deepEqual(JSON.parse(response.body), GALLERY_BIRDS[0])
 }))
 
-test('the server answers 422 for a failing bird.json and never serves its keyframes', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server answers 422 for a failing bird.json and never serves its keyframes', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
   const keyframes = '@keyframes fly_test { 0% { transform: url(https://evil.example/x.svg); } }'
   await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(birdWithKeyframes(keyframes)))
 
@@ -390,11 +486,53 @@ test('the server answers 422 for a failing bird.json and never serves its keyfra
   assert.match(JSON.parse(response.body).errors.join('\n'), /"url\(" is not allowed/)
 }))
 
-test('the server answers 422 for a bird.json over the byte cap', (t) => withWorkspace(async ({ workspace }) => {
-  const port = await startBirdServer(t, workspace)
+test('the server answers 422 for a bird.json over the byte cap', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
   await writeFile(path.join(workspace, 'bird.json'), ' '.repeat(MAX_BIRD_FILE_BYTES + 1))
 
   const response = await sendRequest({ port, requestPath: '/bird.json' })
+
+  assert.equal(response.status, 422)
+}))
+
+test('the server answers 422 for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  makeFifo(path.join(workspace, 'bird.json'))
+
+  const response = await sendRequest({ port, requestPath: '/bird.json' })
+
+  assert.equal(response.status, 422)
+  assert.equal((await sendRequest({ port, requestPath: '/health' })).status, 200)
+}))
+
+test('the server refuses a symlinked bird.json without echoing its target', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const target = path.join(directory, 'secret.txt')
+  await writeFile(target, 'top-secret-line')
+  await symlink(target, path.join(workspace, 'bird.json'))
+
+  const response = await sendRequest({ port, requestPath: '/bird.json' })
+
+  assert.equal(response.status, 422)
+  assert.ok(!response.body.toString().includes('top-secret'), response.body.toString())
+}))
+
+test('the server does not serve a symlinked bird.png', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const target = path.join(directory, 'elsewhere.png')
+  await writeFile(target, TINY_PNG)
+  await symlink(target, path.join(workspace, 'bird.png'))
+
+  const response = await sendRequest({ port, requestPath: '/bird.png' })
+
+  assert.equal(response.status, 422)
+}))
+
+test('the server does not serve a bird.png over the size cap', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  await writeFile(path.join(workspace, 'bird.png'), Buffer.concat([TINY_PNG, Buffer.alloc(MAX_PNG_BYTES)]))
+
+  const response = await sendRequest({ port, requestPath: '/bird.png' })
 
   assert.equal(response.status, 422)
 }))
@@ -418,9 +556,9 @@ const runHook = (hook, { workspace, port }) => new Promise((resolve) => {
 })
 
 /** Runs setup in a fresh workspace on a free port, with cleanup registered for when the test ends. */
-const runSetup = async (t, workspace) => {
+const runSetup = async (testContext, workspace) => {
   const port = await findFreePort()
-  t.after(() => runHook('cleanup', { workspace, port }))
+  testContext.after(() => runHook('cleanup', { workspace, port }))
 
   return { port, setupResult: await runHook('setup', { workspace, port }) }
 }
@@ -428,29 +566,34 @@ const runSetup = async (t, workspace) => {
 /** True when something answers GET /health on `port`. */
 const isAnswering = (port) => sendRequest({ port, requestPath: '/health' }).then(() => true, () => false)
 
-test('setup starts the page server and exits, and cleanup stops it', (t) => withWorkspace(async ({ workspace }) => {
-  const { port, setupResult } = await runSetup(t, workspace)
+test('setup starts the page server and exits', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { port, setupResult } = await runSetup(testContext, workspace)
+
   const health = await sendRequest({ port, requestPath: '/health' })
   const page = await sendRequest({ port, requestPath: '/' })
-
-  const cleanupResult = await runHook('cleanup', { workspace, port })
-
   assert.equal(setupResult.code, 0, setupResult.stderr)
   assert.equal(health.status, 200)
   assert.match(JSON.parse(health.body).instance, /^[0-9a-f]{64}$/)
   assert.equal(page.status, 200)
   assert.match(page.body.toString(), /<script type="module" src="\/app.mjs"><\/script>/)
   assert.match(page.headers['content-security-policy'], /script-src 'self'/)
+}))
+
+test('cleanup stops the page server and removes its state', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { port } = await runSetup(testContext, workspace)
+
+  const cleanupResult = await runHook('cleanup', { workspace, port })
+
   assert.equal(cleanupResult.code, 0, cleanupResult.stderr)
   assert.equal(await isAnswering(port), false)
   assert.deepEqual(await readdir(workspace), [])
 }))
 
-test('setup fails with a message naming the port when the port is busy', (t) => withWorkspace(async ({ workspace }) => {
+test('setup fails with a message naming the port when the port is busy', (testContext) => withWorkspace(async ({ workspace }) => {
   const occupier = net.createServer((socket) => socket.destroy())
   await new Promise((resolve) => occupier.listen(0, '127.0.0.1', resolve))
   const { port } = occupier.address()
-  t.after(() => new Promise((resolve) => occupier.close(resolve)))
+  testContext.after(() => new Promise((resolve) => occupier.close(resolve)))
 
   const setupResult = await runHook('setup', { workspace, port })
 
@@ -458,8 +601,8 @@ test('setup fails with a message naming the port when the port is busy', (t) => 
   assert.match(setupResult.stderr, new RegExp(`port ${port} is busy`))
 }))
 
-test('cleanup succeeds when run twice', (t) => withWorkspace(async ({ workspace }) => {
-  const { port } = await runSetup(t, workspace)
+test('cleanup succeeds when run twice', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { port } = await runSetup(testContext, workspace)
 
   const firstRun = await runHook('cleanup', { workspace, port })
   const secondRun = await runHook('cleanup', { workspace, port })
@@ -468,11 +611,11 @@ test('cleanup succeeds when run twice', (t) => withWorkspace(async ({ workspace 
   assert.equal(secondRun.code, 0, secondRun.stderr)
 }))
 
-test('cleanup succeeds after setup failed on a busy port', (t) => withWorkspace(async ({ workspace }) => {
+test('cleanup succeeds after setup failed on a busy port', (testContext) => withWorkspace(async ({ workspace }) => {
   const occupier = net.createServer((socket) => socket.destroy())
   await new Promise((resolve) => occupier.listen(0, '127.0.0.1', resolve))
   const { port } = occupier.address()
-  t.after(() => new Promise((resolve) => occupier.close(resolve)))
+  testContext.after(() => new Promise((resolve) => occupier.close(resolve)))
   await runHook('setup', { workspace, port })
 
   const cleanupResult = await runHook('cleanup', { workspace, port })
@@ -483,6 +626,7 @@ test('cleanup succeeds after setup failed on a busy port', (t) => withWorkspace(
 
 /** A minimal DOM element that records textContent and throws if anything parses HTML. */
 class TextOnlyElement {
+  /** Makes an empty element with the given tag name. */
   constructor(tagName) {
     this.tagName = tagName
     this.className = ''

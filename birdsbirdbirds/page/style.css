@@ -44,8 +44,6 @@ button:disabled {
   opacity: 0.45;
 }
 
-/* Draw mode */
-
 #draw-mode {
   max-width: 1000px;
   margin: 0 auto;
@@ -228,8 +226,6 @@ button:disabled {
   font-weight: 700;
   text-decoration: underline;
 }
-
-/* Sky mode */
 
 #sky-mode {
   position: fixed;

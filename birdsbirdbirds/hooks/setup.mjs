@@ -10,7 +10,7 @@ import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from 'nod
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { DEFAULT_PORT, PORT_BUSY_EXIT_CODE, sha256Hex } from '../server.mjs'
+import { PORT_BUSY_EXIT_CODE, portFromEnvironment, sha256Hex } from '../server.mjs'
 import { delay, fetchInstance, HEALTH_POLL_INTERVAL_MS, statePaths, workspaceFromEnvironment } from './state.mjs'
 
 const SERVER_SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'server.mjs')
@@ -19,15 +19,13 @@ const STARTUP_TIMEOUT_MS = 10_000
 /** A setup failure whose message is shown to the participant as is. */
 class SetupError extends Error {}
 
-/** Reads BIRDSBIRDBIRDS_PORT (default 4322), failing on anything but a port number. */
-function portFromEnvironment(environment) {
-  const portText = environment.BIRDSBIRDBIRDS_PORT ?? String(DEFAULT_PORT)
-  const port = Number(portText)
-  if (!/^\d+$/.test(portText) || port < 1 || port > 65535) {
-    throw new SetupError(`BIRDSBIRDBIRDS_PORT must be a port number from 1 to 65535, got ${JSON.stringify(portText)}`)
+/** Reads BIRDSBIRDBIRDS_PORT (default 4322) as a SetupError-reported setting. */
+function readPort(environment) {
+  try {
+    return portFromEnvironment(environment)
+  } catch (error) {
+    throw new SetupError(error.message)
   }
-
-  return port
 }
 
 /** Spawns server.mjs with its output appended to `logFile`, unref'd so setup can exit while it runs. */
@@ -86,7 +84,7 @@ function readLogTail(logFile) {
 /** Starts the server for the workspace and records `{ port, token }` for cleanup. */
 async function setUp(environment) {
   const workspace = workspaceFromEnvironment(environment)
-  const port = portFromEnvironment(environment)
+  const port = readPort(environment)
   const { directory, serverFile, logFile } = statePaths(workspace)
   const token = randomBytes(32).toString('hex')
 
@@ -100,8 +98,7 @@ async function setUp(environment) {
 
 try {
   await setUp(process.env)
-  process.exit(0)
 } catch (error) {
   console.error(`birdsbirdbirds setup: ${error instanceof SetupError ? error.message : error.stack}`)
-  process.exit(1)
+  process.exitCode = 1
 }
