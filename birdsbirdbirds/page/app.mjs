@@ -1,7 +1,8 @@
 // The BirdsBirdBirds page: a canvas to draw the bird and save it as
 // bird.png, then a sky where it flies once Pi's bird.json passes the checker.
 // The server only ever serves a checked bird.json, so its keyframes are safe
-// to put in the page's keyframes <style>.
+// to adopt as a constructed stylesheet; the page needs no inline <style>, so
+// its CSP can refuse them.
 
 import { createBirdLabel } from './bird-label.mjs'
 
@@ -40,7 +41,6 @@ const waitingNote = document.getElementById('waiting-note')
 const toSkyButton = document.getElementById('to-sky-button')
 const drawAgainButton = document.getElementById('draw-again-button')
 const sky = document.getElementById('sky')
-const keyframesStyle = document.getElementById('bird-keyframes')
 
 const pen = { colour: COLOURS[0].value, width: PEN_SIZES[1].width, erasing: false }
 const stroke = { pointerId: undefined, lastPoint: undefined }
@@ -236,10 +236,22 @@ async function saveBird() {
   }
 }
 
+/** The constructed stylesheet holding the current bird's keyframes, once one has flown. */
+let keyframesSheet
+
+/** Replaces the bird's keyframes sheet with one holding `css`, leaving any other adopted sheets in place. */
+function adoptKeyframes(css) {
+  const sheet = new CSSStyleSheet()
+  sheet.replaceSync(css)
+  const otherSheets = document.adoptedStyleSheets.filter((adopted) => adopted !== keyframesSheet)
+  document.adoptedStyleSheets = [...otherSheets, sheet]
+  keyframesSheet = sheet
+}
+
 /** Puts the bird from a checked entry in the sky, replacing any bird and keyframes already there. */
 function renderFlyingBird(entry) {
   const { bird_name: birdName, origin, animation } = entry
-  keyframesStyle.textContent = animation.css_keyframes
+  adoptKeyframes(animation.css_keyframes)
   flight.imageVersion += 1
 
   const wrapper = document.createElement('div')

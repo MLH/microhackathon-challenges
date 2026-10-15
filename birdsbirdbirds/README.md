@@ -70,11 +70,13 @@ An item is published with kind `bird` and renderer `birds-v1`. The image is
 
 `bird_name` and `origin` hold at least one visible letter, digit, symbol, or
 punctuation mark, and at most 4 accent marks stacked on a letter. They hold
-no control characters, bidi controls (U+061C, U+200E, U+200F, U+202A to
-U+202E, U+2066 to U+2069), invisible characters (U+200B, U+2060 to U+2064,
-U+FEFF, U+00AD), or line and paragraph separators (U+2028, U+2029). The
-zero-width joiner and non-joiner (U+200D, U+200C) and the emoji variation
-selector (U+FE0F) are allowed, since real names and emoji need them.
+no control characters, no format characters (Unicode `Cf`, such as bidi
+controls, zero-width spaces, soft hyphens, and tag characters U+E0000 to
+U+E007F), no line or paragraph separators (U+2028, U+2029), and no blank
+letters: the Hangul fillers (U+115F, U+1160, U+3164, U+FFA0) and the braille
+blank (U+2800). The zero-width non-joiner and joiner (U+200C, U+200D) and the
+emoji variation selector (U+FE0F) are allowed, since real names and emoji
+need them.
 
 The `fly_` prefix keeps a bird's keyframes from colliding with CSS keywords
 or with the sky page's own `flap` keyframes.
@@ -84,9 +86,10 @@ at `top: 0; left: 0`, so `translate(x, y)` is measured from the top-left
 corner of the sky with no extra offset. A gallery renderer should place the
 bird the same way.
 
-Payloads come from `check-bird.mjs`, but a display should still insert
-`css_keyframes` only as text into a `<style>` element and set names with
-`textContent`, never as HTML.
+Payloads come from `check-bird.mjs`, but a display should still load
+`css_keyframes` only as CSS text, as the sky page does with a constructed
+`CSSStyleSheet` (`replaceSync`), and set names with `textContent`, never as
+HTML.
 
 ## What the checker allows
 

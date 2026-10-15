@@ -1,7 +1,7 @@
 // Serves the drawing page and the sky on 127.0.0.1. The page saves the
 // participant's drawing as <workspace>/bird.png and polls bird.json, which is
 // served only once check-bird.mjs passes it, so nothing unchecked reaches the
-// page's keyframes <style>.
+// page's keyframes stylesheet.
 //
 // Run as `node server.mjs` with BIRDSBIRDBIRDS_WORKSPACE (absolute),
 // BIRDSBIRDBIRDS_TOKEN, and optionally BIRDSBIRDBIRDS_PORT (default 4322).
@@ -34,7 +34,7 @@ const STATIC_FILES = {
 }
 
 const SECURITY_HEADERS = {
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self'; script-src 'self'",
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data:; style-src 'self'; connect-src 'self'; script-src 'self'",
   'X-Content-Type-Options': 'nosniff',
   'Cache-Control': 'no-store',
 }

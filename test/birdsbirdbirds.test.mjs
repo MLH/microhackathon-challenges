@@ -1,5 +1,5 @@
 // Proves the birdsbirdbirds package: check-bird.mjs accepts real gallery
-// birds and rejects CSS that could escape the page's keyframes <style>; the
+// birds and rejects CSS that could escape the page's keyframes stylesheet; the
 // page server saves only PNGs to bird.png and serves only checked birds; the
 // setup and cleanup hooks start and stop it; the label never parses HTML.
 
@@ -275,6 +275,21 @@ const REJECTED_BIRDS = [
     mentions: /origin contains the invisible character U\+2066; use plain visible text/,
   },
   {
+    behavior: 'rejects a Unicode tag character in the bird name',
+    entry: birdEntry({ bird_name: 'Rob\u{E0041}in' }),
+    mentions: /bird_name contains the invisible character U\+E0041; use plain visible text/,
+  },
+  {
+    behavior: 'rejects a Hangul filler in the bird name',
+    entry: birdEntry({ bird_name: 'Rob\u3164in' }),
+    mentions: /bird_name contains the invisible character U\+3164; use plain visible text/,
+  },
+  {
+    behavior: 'rejects a bird name that is only a braille blank',
+    entry: birdEntry({ bird_name: '\u2800' }),
+    mentions: /bird_name contains the invisible character U\+2800; use plain visible text/,
+  },
+  {
     behavior: 'rejects a soft hyphen in the bird name',
     entry: birdEntry({ bird_name: 'Rob\u00ADin' }),
     mentions: /bird_name contains the invisible character U\+00AD; use plain visible text/,
@@ -319,6 +334,24 @@ for (const { behavior, entry, mentions } of REJECTED_BIRDS) {
     assert.match(errors.join('\n'), mentions)
   })
 }
+
+test('names an invisible character in css_keyframes by code point, never printing it', () => {
+  const entry = birdWithKeyframes('@keyframes fly_test { 0% { transform: none\u202E; } }')
+
+  const message = checkBird(entry).join('\n')
+
+  assert.match(message, /U\+202E/)
+  assert.ok(!message.includes('\u202E'), JSON.stringify(message))
+})
+
+test('names an invisible character in animation_name by code point, never printing it', () => {
+  const entry = birdEntry({ animation: { animation_name: 'fly_\u202Etest' } })
+
+  const message = checkBird(entry).join('\n')
+
+  assert.match(message, /U\+202E/)
+  assert.ok(!message.includes('\u202E'), JSON.stringify(message))
+})
 
 test('the checker CLI passes a valid bird.json from the current directory', () => withTemporaryDirectory(async (workspace) => {
   await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(GALLERY_BIRDS[2]))
@@ -495,6 +528,17 @@ for (const { behavior, upload, status } of REFUSED_UPLOADS) {
     assert.deepEqual(await readdir(directory), ['workspace'])
   }))
 }
+
+test('the server sends the page with a CSP that admits no inline styles and no blob: images', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+
+  const response = await sendRequest({ port, requestPath: '/' })
+
+  const policy = response.headers['content-security-policy']
+  assert.match(policy, /style-src 'self';/)
+  assert.doesNotMatch(policy, /'unsafe-inline'|blob:/)
+  assert.doesNotMatch(response.body.toString(), /<style|style=/)
+}))
 
 test('the server answers 404 for bird.json before Pi writes it', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)

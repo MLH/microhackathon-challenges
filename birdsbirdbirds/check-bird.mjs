@@ -1,5 +1,5 @@
-// Checks a bird.json entry before the page injects its keyframes into a
-// <style> element. `checkBird` is pure and returns actionable error strings;
+// Checks a bird.json entry before the page adopts its keyframes as a
+// stylesheet. `checkBird` is pure and returns actionable error strings;
 // run as `node check-bird.mjs [path]` it checks a file (default bird.json).
 //
 // css_keyframes goes through a small strict tokenizer and parser that accepts
@@ -89,11 +89,15 @@ const DURATION_PATTERN = /^\d+(\.\d+)?s$/
 const CONTROL_CHARACTER_PATTERN = /\p{Cc}/u
 
 /**
- * Bidi controls, zero-width and other invisible characters, and line and
- * paragraph separators. Zero-width (non-)joiners and the emoji variation
- * selector stay allowed: Persian, Sinhala, Devanagari, and emoji need them.
+ * Characters that render blank or reorder text: every format character
+ * (Cf: bidi controls, zero-width spaces, soft hyphens, tag characters), line
+ * and paragraph separators, the Hangul fillers, and the braille blank. The
+ * zero-width non-joiner and joiner (U+200C, U+200D) stay allowed because
+ * Persian, Sinhala, Devanagari, and emoji sequences need them; the emoji
+ * variation selector U+FE0F is a mark, not Cf, so it is allowed too.
  */
-const INVISIBLE_CHARACTER_PATTERN = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069\u200B\u2060-\u2064\uFEFF\u00AD\u2028\u2029]/u
+const INVISIBLE_CHARACTER_PATTERN = /[[\p{Cf}--[\u200C\u200D]]\p{Zl}\p{Zp}\u115F\u1160\u3164\uFFA0\u2800]/v
+const OTHER_CHARACTER_PATTERN = /\p{C}/gu
 const VISIBLE_CHARACTER_PATTERN = /[\p{L}\p{N}\p{S}\p{P}]/u
 const MAX_STACKED_MARKS = 4
 const STACKED_MARKS_PATTERN = new RegExp(`\\p{M}{${MAX_STACKED_MARKS + 1},}`, 'u')
@@ -361,7 +365,7 @@ function tokenize(source, field) {
       tokens.push({ type: 'number', value, unit, text: source.slice(start, index) })
     } else {
       const name = readIdentifier()
-      if (name === '') throw new CheckError(`${field}: unexpected character ${quote(character)} (${codePointName(character)}); use only letters, digits, spaces and { } : ; , ( ) . % -`)
+      if (name === '') throw new CheckError(`${field}: unexpected character ${describeCharacter(String.fromCodePoint(source.codePointAt(index)))}; use only letters, digits, spaces and { } : ; , ( ) . % -`)
       if (source[index] === '(') {
         index += 1
         tokens.push({ type: 'function', value: name })
@@ -647,16 +651,32 @@ function checkTimingValue(value, field) {
   }
 }
 
+/**
+ * Describes one character for a message: quoted with its code point, or by
+ * code point alone when it is a control, format, or other invisible character.
+ */
+function describeCharacter(character) {
+  const name = codePointName(character)
+  if (/\p{C}/u.test(character)) return name
+
+  return `${quote(character)} (${name})`
+}
+
 /** Names a character by its code point, such as U+202E. */
 function codePointName(character) {
   return `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`
 }
 
-/** Quotes a value for a message, shortened so a long input never floods the output. */
+/**
+ * Quotes a value for a message, shortened so a long input never floods the
+ * output, with every control, format, or other invisible character shown as
+ * its code point.
+ */
 function quote(value) {
-  const text = String(value)
+  const text = [...String(value)]
+  const shortened = text.length > 40 ? `${text.slice(0, 40).join('')}...` : text.join('')
 
-  return JSON.stringify(text.length > 40 ? `${text.slice(0, 40)}...` : text)
+  return JSON.stringify(shortened.replace(OTHER_CHARACTER_PATTERN, codePointName))
 }
 
 /** Checks the file named by `argv[0]` (default bird.json) and returns the exit code. */
