@@ -70,8 +70,9 @@ function carriesToken(request, token) {
 }
 
 /**
- * Reads `workspace/index.html` without following a symlink out of the
- * workspace. Returns its text, or undefined when there is none yet.
+ * Reads `workspace/index.html`, refusing a symlink or hard link, either of
+ * which could point outside the workspace. Returns its text, or undefined
+ * when there is none yet.
  */
 function readApp(workspace) {
   let descriptor
@@ -84,7 +85,9 @@ function readApp(workspace) {
 
   try {
     const stats = fstatSync(descriptor)
-    if (!stats.isFile() || stats.size > MAX_APP_BYTES) throw new Error('index.html is not a small regular file')
+    if (!stats.isFile() || stats.nlink > 1 || stats.size > MAX_APP_BYTES) {
+      throw new Error('index.html is not a small, singly linked regular file')
+    }
 
     return readFileSync(descriptor, 'utf8')
   } finally {
@@ -92,10 +95,15 @@ function readApp(workspace) {
   }
 }
 
-/** Sends `page` with the reload script added and the lockdown headers. */
+/**
+ * Sends `page` with the lockdown headers and the reload script before its
+ * last `</body>`, so a `</body>` inside the page's own script stays intact.
+ */
 function sendPage(response, page) {
-  const closingBody = /<\/body\s*>/i
-  const withReload = closingBody.test(page) ? page.replace(closingBody, `${RELOAD_SCRIPT}</body>`) : page + RELOAD_SCRIPT
+  const closingBodyAt = page.toLowerCase().lastIndexOf('</body')
+  const withReload = closingBodyAt === -1
+    ? page + RELOAD_SCRIPT
+    : page.slice(0, closingBodyAt) + RELOAD_SCRIPT + page.slice(closingBodyAt)
   response.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
     'content-security-policy': CONTENT_SECURITY_POLICY,
@@ -115,7 +123,7 @@ function serve({ workspace, port, token }) {
   const server = createServer((request, response) => {
     // Loopback alone doesn't stop a page on a hostname rebound to 127.0.0.1.
     if (request.headers.host !== `${HOST}:${port}`) {
-      response.writeHead(403).end()
+      response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' }).end(`Open http://${HOST}:${port}/ instead.\n`)
       return
     }
 

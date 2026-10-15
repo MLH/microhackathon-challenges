@@ -4,7 +4,7 @@
 
 import { Input, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
 
-import { FIELDS, PROMPT_TEMPLATE, assemblePrompt, fillSentence, findBlankField, isFinishedPrompt } from './prompt.mjs'
+import { FIELDS, PROMPT_TEMPLATE, assemblePrompt, fillSentence, findBlankField, hasUnfilledBlank, isFinishedPrompt } from './prompt.mjs'
 
 /** The form's focus stops: one per field, then the Build button. */
 const BUILD_BUTTON = FIELDS.length
@@ -173,7 +173,7 @@ export default function madLibs(pi) {
   pi.on('input', (event, ctx) => {
     const typedSentenceWithBlank = event.source === 'interactive'
       && /^\s*Build an?\b/i.test(event.text)
-      && !isFinishedPrompt(event.text)
+      && hasUnfilledBlank(event.text)
       && !promptAlreadySent(ctx)
     if (!typedSentenceWithBlank) return { action: 'continue' }
 

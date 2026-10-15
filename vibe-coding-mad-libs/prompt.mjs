@@ -13,7 +13,7 @@ export const FIELDS = [
 export const PROMPT_TEMPLATE = 'Build a [Theme] about [Subject] for [Audience] in [Style] style.'
 
 const UNFILLED_BLANK = /\[(?:Theme|Subject|Audience|Style)\]/i
-const FINISHED_SENTENCE = /^Build an? (.+?) about (.+?) for (.+?) in (.+?) style\.$/i
+const FINISHED_SENTENCE = /^Build an? (.+?) about (.+?) for (.+?) in (.+?) style[.!]?$/i
 
 /** True when `answer` is empty, spans lines, or still holds a bracketed blank. */
 function isBlank(answer) {
@@ -57,7 +57,12 @@ export function assemblePrompt(answers) {
   return fillSentence(answers)
 }
 
-/** True when `text` is the whole sentence with all four blanks filled. */
+/** True when `text` still holds a bracketed blank, such as `[Style]`. */
+export function hasUnfilledBlank(text) {
+  return UNFILLED_BLANK.test(text)
+}
+
+/** True when `text` is the whole sentence with all four blanks filled, ending in `.`, `!`, or nothing. */
 export function isFinishedPrompt(text) {
   const match = FINISHED_SENTENCE.exec(text.trim())
   if (!match) return false

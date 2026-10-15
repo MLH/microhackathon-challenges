@@ -4,14 +4,14 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cp, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
-import { createServer } from 'node:http'
+import { cp, link, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { createServer, get } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { assemblePrompt, fillSentence, isFinishedPrompt } from '../vibe-coding-mad-libs/prompt.mjs'
+import { assemblePrompt, fillSentence, hasUnfilledBlank, isFinishedPrompt } from '../vibe-coding-mad-libs/prompt.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const packageDirectory = path.join(testDirectory, '..', 'vibe-coding-mad-libs')
@@ -83,6 +83,16 @@ const getPreview = async (port) => {
 
   return { status: response.status, text: await response.text() }
 }
+
+/** GETs the preview's `/` on `port` with `host` as the Host header, as a browser on that name would. */
+const getPreviewAs = (port, host) => new Promise((resolve, reject) => {
+  get({ host: '127.0.0.1', port, path: '/', headers: { host } }, (response) => {
+    let text = ''
+    response.setEncoding('utf8')
+    response.on('data', (chunk) => { text += chunk })
+    response.on('end', () => resolve({ status: response.statusCode, text }))
+  }).on('error', reject)
+})
 
 /** True when connecting to `port` is refused. */
 const isRefused = async (port) => {
@@ -171,6 +181,8 @@ for (const [key, label] of Object.entries(fieldNames)) {
 const finishedPromptCases = [
   { name: 'a finished sentence', text: 'Build a game about cats for kids in retro style.', finished: true },
   { name: 'a finished sentence starting with "Build an"', text: 'Build an app about cats for kids in retro style.', finished: true },
+  { name: 'a finished sentence without a final period', text: 'Build a game about cats for kids in retro style', finished: true },
+  { name: 'a finished sentence ending in "!"', text: 'Build a game about cats for kids in retro style!', finished: true },
   { name: 'a finished sentence with surrounding whitespace', text: '  Build a game about cats for kids in retro style.\n', finished: true },
   { name: 'a sentence with a bracketed blank', text: 'Build a [Theme] about cats for kids in retro style.', finished: false },
   { name: 'the unfilled template', text: 'Build a [Theme] about [Subject] for [Audience] in [Style] style.', finished: false },
@@ -179,6 +191,19 @@ const finishedPromptCases = [
   { name: 'other text', text: 'Make me a website about cats', finished: false },
   { name: 'an empty string', text: '', finished: false },
 ]
+
+const unfilledBlankCases = [
+  { text: 'Build a [Theme] about cats for kids in retro style.', unfilled: true },
+  { text: 'Build a game about cats for kids in [style] style', unfilled: true },
+  { text: 'Build a game about cats for kids in retro style', unfilled: false },
+  { text: 'Build a game about cats, please', unfilled: false },
+]
+
+for (const { text, unfilled } of unfilledBlankCases) {
+  test(`${unfilled ? 'finds' : 'finds no'} bracketed blank in "${text}"`, () => {
+    assert.equal(hasUnfilledBlank(text), unfilled)
+  })
+}
 
 for (const { name, text, finished } of finishedPromptCases) {
   test(`${finished ? 'accepts' : 'rejects'} ${name} as a finished prompt`, () => {
@@ -232,6 +257,46 @@ test('the preview serves index.html once it exists', async (context) => {
 
   assert.equal(app.status, 200)
   assert.match(app.text, /hello app/)
+})
+
+test('the preview adds the reload script before the last </body>, leaving one in a script intact', async (context) => {
+  const port = await findFreePort()
+  const workspace = await makeWorkspace(context, port)
+  const setup = await runHook('setup', workspace, port)
+  assert.equal(setup.code, 0, setup.stderr)
+  await writeFile(path.join(workspace, 'index.html'), '<body><script>const tag = "</body>"</script></body>')
+
+  const app = await getPreview(port)
+
+  assert.match(app.text, /^<body><script>const tag = "<\/body>"<\/script><script>new EventSource/)
+  assert.match(app.text, /<\/script><\/body>$/)
+})
+
+test('the preview refuses a hard-linked index.html', async (context) => {
+  const port = await findFreePort()
+  const workspace = await makeWorkspace(context, port)
+  const setup = await runHook('setup', workspace, port)
+  assert.equal(setup.code, 0, setup.stderr)
+  const outside = path.join(await makeTemporaryDirectory(context), 'outside.html')
+  await writeFile(outside, 'outside secret')
+  await link(outside, path.join(workspace, 'index.html'))
+
+  const app = await getPreview(port)
+
+  assert.equal(app.status, 503)
+  assert.doesNotMatch(app.text, /outside secret/)
+})
+
+test('the preview tells a visitor on another host name which URL to open', async (context) => {
+  const port = await findFreePort()
+  const workspace = await makeWorkspace(context, port)
+  const setup = await runHook('setup', workspace, port)
+  assert.equal(setup.code, 0, setup.stderr)
+
+  const refused = await getPreviewAs(port, `localhost:${port}`)
+
+  assert.equal(refused.status, 403)
+  assert.match(refused.text, new RegExp(`Open http://127\\.0\\.0\\.1:${port}/`))
 })
 
 test('setup keeps the preview server in setup\'s own process group', async (context) => {
