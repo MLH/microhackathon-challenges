@@ -1,0 +1,16 @@
+{
+  "name": "microhackathon-challenges",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=26.4"
+  },
+  "scripts": {
+    "verify": "node tools/verify.mjs",
+    "test": "node --test 'test/*.test.mjs'",
+    "lint": "npx --yes markdownlint-cli2@0.23.3"
+  },
+  "devDependencies": {
+    "@mlhacks/boothstrap": "0.0.2"
+  }
+}

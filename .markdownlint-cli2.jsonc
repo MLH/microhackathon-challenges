@@ -1,0 +1,15 @@
+{
+  "globs": ["**/*.md"],
+  "gitignore": true,
+  "ignores": [
+    // Its placeholders read as HTML, and it opens without a heading by design.
+    ".github/pull_request_template.md",
+    // Fixture Markdown is test data, not documentation.
+    "test/fixtures/**",
+    "**/node_modules/**"
+  ],
+  "config": {
+    // Wrap prose at 80 columns; tables and code can't wrap without breaking.
+    "MD013": { "tables": false, "code_blocks": false }
+  }
+}

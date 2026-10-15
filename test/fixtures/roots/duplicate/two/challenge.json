@@ -1,0 +1,22 @@
+{
+  "id": "fixture-alpha",
+  "title": "Fixture fixture-alpha",
+  "tagline": "Minimal valid package.",
+  "type": "terminal",
+  "agent": "pi",
+  "model": "google/gemini-2.5-flash",
+  "vault_services": ["gemini"],
+  "points": 10,
+  "estimated_minutes": 2,
+  "learning_objectives": ["talking to an agent"],
+  "featured_tech": ["Pi"],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "hello",
+      "title": "Say hello",
+      "hint": "Ask the agent to print hello.",
+      "done_when": "The agent has printed hello in the terminal."
+    }
+  ]
+}
