@@ -11,7 +11,8 @@ the installed package directory.
 1. Invite the participant to ask you to read `welcome.txt` and say hello. Read
    the file and greet them, then report step `greet`.
 2. Invite them to ask you to make a file. When they do, create `hello.txt` in
-   the workspace containing `Hello, world!`. Read it back to verify. If the
+   file already exists, read it first and correct it if its contents differ.
+   Only then report step `hello-file`.
    file already exists, read it first and correct it if its contents differ. Only then report step `hello-file`.
 
 To report a step, call `report_step` with its `step_id`. If `report_step`
