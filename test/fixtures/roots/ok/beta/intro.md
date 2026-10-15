@@ -1,0 +1,3 @@
+# fixture-beta
+
+Minimal fixture.
