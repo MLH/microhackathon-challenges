@@ -4,7 +4,7 @@
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cp, link, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { cp, link, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer, get } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -211,10 +211,13 @@ for (const { name, text, finished } of finishedPromptCases) {
   })
 }
 
-test('loads the extension under the pinned Pi packages after install', { timeout: installTimeoutMilliseconds + 60_000 }, async (context) => {
+test('loads the extension under the pinned Pi packages after install through a symlink', { timeout: installTimeoutMilliseconds + 60_000 }, async (context) => {
   const installedPackage = path.join(await makeTemporaryDirectory(context), 'package')
   await cp(packageDirectory, installedPackage, { recursive: true, filter: (source) => path.basename(source) !== 'node_modules' })
-  const installed = await runExecutable(path.join(installedPackage, 'install'), [], { timeout: installTimeoutMilliseconds })
+  // A station can reach its package through a symlink, as macOS's /tmp is one.
+  const linkedPackage = path.join(await makeTemporaryDirectory(context), 'linked-package')
+  await symlink(installedPackage, linkedPackage)
+  const installed = await runExecutable(path.join(linkedPackage, 'install'), [], { timeout: installTimeoutMilliseconds })
   assert.equal(installed.code, 0, installed.stderr)
   const projectDirectory = await makeTemporaryDirectory(context)
   const agentDirectory = await makeTemporaryDirectory(context)
