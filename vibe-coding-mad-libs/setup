@@ -1,0 +1,11 @@
+#!/bin/sh
+# Seeds the workspace with the dice sheet and starts the app preview on
+# http://127.0.0.1:4321/, exiting once it answers. Standalone, the workspace
+# is the current directory.
+set -eu
+
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+workspace=${BOOTHSTRAP_WORKSPACE:-$PWD}
+
+cp -- "$package_dir/dice-sheet.md" "$workspace/dice-sheet.md"
+exec node "$package_dir/preview.mjs" start "$workspace"

@@ -1,0 +1,9 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "vibe-coding-mad-libs",
+  "version": "1.0.0",
+  "description": "Fill four Mad Libs blanks, then build and improve a self-contained web app with Pi.",
+  "extensions": {
+    "io.mlh.boothstrap": { "pi_extensions": ["mad-libs.mjs"] }
+  }
+}
