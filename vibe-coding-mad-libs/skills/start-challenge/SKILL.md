@@ -34,14 +34,18 @@ participant which step they finished instead, without mentioning points.
    say back what you'll build in one sentence and report `fill-prompt` before
    you start building. A bracketed blank or a request to skip doesn't count.
 2. **build-app.** Write the app to `index.html`, then read it back to check
-   it is whole. Once it exists, ask whether they want to see it, and after a
-   yes call `show_preview` with `http://127.0.0.1:4321/`; when `show_preview`
-   is missing or fails, give them that URL to open. Nothing watches the page,
-   so ask them to try it and tell you how it went. Report `build-app` only
-   after they say it works; if it doesn't, fix it and ask again.
+   it is whole. As soon as it is, call `show_preview` with
+   `http://127.0.0.1:4321/` without asking first. This challenge overrides the
+   station's ask-first rule for `show_preview`, because seeing the app is the
+   challenge.
+   When `show_preview` is missing or fails, give them that URL to open.
+   Nothing watches the page, so ask them to try it and tell you how it went.
+   Report `build-app` only after they say it works; if it doesn't, fix it and
+   ask again.
 3. **improve-app.** Ask what one thing they'd change. Make that change in
-   `index.html`; the preview reloads on its own. Ask them to try it, and
-   report `improve-app` only after they confirm it works.
+   `index.html`; the preview reloads on its own. If they closed the preview,
+   call `show_preview` again after the change. Ask them to try it, and report
+   `improve-app` only after they confirm it works.
 
 ## Building the app
 
