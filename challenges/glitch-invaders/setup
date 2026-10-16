@@ -1,0 +1,5 @@
+#!/bin/sh
+# Setup hook: resolve demo or live mode, write a fresh runtime config into the workspace, and
+# start the page server in the background. Exits 0 once the server answers.
+set -eu
+exec node "${BOOTHSTRAP_PACKAGE_DIR:-$(dirname "$0")}/server/setup.mjs"

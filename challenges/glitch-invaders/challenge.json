@@ -1,0 +1,59 @@
+{
+  "id": "glitch-invaders",
+  "title": "Glitch Invaders: On-Call",
+  "tagline": "Shoot the bugs, then debug the three that fight back using Sentry evidence.",
+  "icon": "bug",
+  "type": "browser",
+  "agent": "pi",
+  "model": "google/gemini-3.8-flash",
+  "vault_services": [
+    "gemini"
+  ],
+  "points": 150,
+  "estimated_minutes": 9,
+  "learning_objectives": [
+    "reading stack traces and error context",
+    "tracing a logic bug with breadcrumbs",
+    "spotting bottlenecks in a performance trace"
+  ],
+  "featured_tech": [
+    "Sentry"
+  ],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "launch-game",
+      "title": "Launch your patch drone",
+      "hint": "Press Start in the game, then shoot the first glitches.",
+      "done_when": "The page's #boothstrap-state text includes \"launched=yes\"."
+    },
+    {
+      "id": "fix-weapon",
+      "title": "Fix the jammed weapon",
+      "hint": "Grab the gold upgrade and fire. Then trace the error in the Incident Console.",
+      "done_when": "The page's #boothstrap-state text includes \"weapon=repaired\"."
+    },
+    {
+      "id": "fix-shield",
+      "title": "Fix the shield that hurts",
+      "hint": "Grab the blue shield and take a hit. Read the breadcrumbs, then patch it.",
+      "done_when": "The page's #boothstrap-state text includes \"shield=repaired\"."
+    },
+    {
+      "id": "fix-boss",
+      "title": "Fix the slow boss spawn",
+      "hint": "Clear the wave so the boss spawns. Find the bottleneck in the trace.",
+      "done_when": "The page's #boothstrap-state text includes \"boss=repaired\"."
+    },
+    {
+      "id": "debrief",
+      "title": "Tell your guide what you found",
+      "hint": "Say which clue helped most: the stack trace, the breadcrumbs, or the trace.",
+      "done_when": "All three fixes are repaired and the participant has told the guide, in their own words, which evidence helped them find a cause."
+    }
+  ],
+  "browser": {
+    "start_url": "http://127.0.0.1:4373/",
+    "monitor_skill": "monitor/SKILL.md"
+  }
+}

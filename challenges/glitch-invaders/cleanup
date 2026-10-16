@@ -1,0 +1,4 @@
+#!/bin/sh
+# Cleanup hook: stop the page server and remove this attempt's files. Safe to run twice.
+set -eu
+exec node "${BOOTHSTRAP_PACKAGE_DIR:-$(dirname "$0")}/server/cleanup.mjs"
