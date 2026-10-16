@@ -419,17 +419,20 @@ const pngChunk = (type, data) => {
   return Buffer.concat([length, typeAndData, checksum])
 }
 
-/** A valid 1×1 transparent RGBA PNG. */
-const TINY_PNG = (() => {
+/** Builds a valid 1×1 RGBA PNG whose one pixel is `rgba` (four bytes). */
+const onePixelPng = (rgba) => {
   const header = Buffer.alloc(13)
   header.writeUInt32BE(1, 0)
   header.writeUInt32BE(1, 4)
   header.writeUInt8(8, 8)
   header.writeUInt8(6, 9)
-  const transparentPixelRow = Buffer.from([0, 0, 0, 0, 0])
+  const pixelRow = Buffer.from([0, ...rgba])
 
-  return Buffer.concat([PNG_SIGNATURE, pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(transparentPixelRow)), pngChunk('IEND', Buffer.alloc(0))])
-})()
+  return Buffer.concat([PNG_SIGNATURE, pngChunk('IHDR', header), pngChunk('IDAT', deflateSync(pixelRow)), pngChunk('IEND', Buffer.alloc(0))])
+}
+
+/** A valid 1×1 transparent RGBA PNG. */
+const TINY_PNG = onePixelPng([0, 0, 0, 0])
 
 /** Starts a page server for `workspace` on a free loopback port, closed when the test ends; resolves its port. */
 const startBirdServer = async (testContext, workspace) => {
@@ -843,7 +846,7 @@ const WATCH_EVENT_TIMEOUT_MS = 3_000
 const WATCH_QUIET_MS = WATCH_DEBOUNCE_MS * 6
 
 /** A drawing whose bytes differ from TINY_PNG; the watcher only hashes, so it needn't be a valid PNG. */
-const OTHER_DRAWING = Buffer.concat([TINY_PNG, Buffer.from('another bird')])
+const OTHER_DRAWING = onePixelPng([255, 0, 0, 255])
 
 /** Resolves after `milliseconds`; fs.watch runs in real time, so watcher tests wait for it to go quiet. */
 const waitQuietly = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
@@ -930,6 +933,22 @@ test('the watcher ignores a burst of rewrites with the same drawing', (testConte
 
   for (let rewrite = 0; rewrite < 3; rewrite += 1) await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
 
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 1)
+}))
+
+test('the watcher waits for a complete bird.png, ignoring an empty or half-written one', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { birdSaves } = startWatching(testContext, workspace)
+  const drawingPath = path.join(workspace, 'bird.png')
+  await writeFile(drawingPath, Buffer.alloc(0))
+  await waitQuietly(WATCH_QUIET_MS)
+  await writeFile(drawingPath, TINY_PNG.subarray(0, TINY_PNG.length - 6))
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 0)
+
+  await writeFile(drawingPath, TINY_PNG)
+
+  await birdSaves.waitForCalls(1)
   await waitQuietly(WATCH_QUIET_MS)
   assert.equal(birdSaves.calls.length, 1)
 }))

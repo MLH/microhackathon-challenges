@@ -11,7 +11,7 @@ import { createHash } from 'node:crypto'
 import { watch } from 'node:fs'
 import path from 'node:path'
 
-import { MAX_PNG_BYTES } from './server.mjs'
+import { isCompletePng, MAX_PNG_BYTES } from './server.mjs'
 import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const DEFAULT_DEBOUNCE_MS = 200
@@ -72,7 +72,10 @@ export function watchWorkspace({ workspace, onBirdSaved, onError, debounceMs = D
   }
 }
 
-/** Hex SHA-256 of bird.png, or undefined when it is missing or refused. */
+/**
+ * Hex SHA-256 of bird.png, or undefined when it is missing, refused, or not a
+ * complete PNG yet (a write caught halfway must not count as a new drawing).
+ */
 function drawingHash(drawingPath) {
   let bytes
   try {
@@ -81,6 +84,8 @@ function drawingHash(drawingPath) {
     if (error.code === 'ENOENT' || error instanceof RefusedFileError) return undefined
     throw error
   }
+
+  if (!isCompletePng(bytes)) return undefined
 
   return createHash('sha256').update(bytes).digest('hex')
 }

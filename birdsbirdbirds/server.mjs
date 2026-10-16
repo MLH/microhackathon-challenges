@@ -24,6 +24,8 @@ const LISTEN_HOST = '127.0.0.1'
 const PAGE_DIRECTORY = path.join(path.dirname(fileURLToPath(import.meta.url)), 'page')
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const IHDR_CHUNK_TYPE = Buffer.from('IHDR', 'ascii')
+// IEND has no data, so the chunk (length, type, CRC) is always these 12 bytes.
+const IEND_CHUNK = Buffer.from([0, 0, 0, 0, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82])
 
 /** The page files the server hands out, keyed by request path; nothing else under page/ is reachable. */
 const STATIC_FILES = {
@@ -187,6 +189,11 @@ function readBodyWithin(request, maxBytes) {
     request.on('end', onEnd)
     request.on('error', reject)
   })
+}
+
+/** True when `body` is a whole PNG: signature and IHDR first, and the empty IEND chunk last. */
+export function isCompletePng(body) {
+  return isPngWithHeader(body) && body.subarray(-IEND_CHUNK.length).equals(IEND_CHUNK)
 }
 
 /** True when `body` starts with the PNG signature followed by an IHDR chunk. */
