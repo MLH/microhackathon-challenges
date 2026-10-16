@@ -43,9 +43,9 @@ participant which step they finished instead, without mentioning points.
    Report `build-app` only after they say it works; if it doesn't, fix it and
    ask again.
 3. **improve-app.** Ask what one thing they'd change. Make that change in
-   `index.html`; the preview reloads on its own. If they closed the preview,
-   call `show_preview` again after the change. Ask them to try it, and report
-   `improve-app` only after they confirm it works.
+   `index.html`. After the change, call `show_preview` again; it brings back
+   a closed preview, and an open one reloads on its own. Ask them to try it,
+   and report `improve-app` only after they confirm it works.
 
 ## Building the app
 
