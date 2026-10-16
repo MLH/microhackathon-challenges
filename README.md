@@ -23,8 +23,9 @@ CI runs on every pull request and on every push to `main`, on Ubuntu with
 Node 26. It runs `npm ci`, then:
 
 - `npm run verify`: runs `boothstrap dev --verify` on every package under
-  `challenges/` and fails when two packages share an id or a `challenge.json`
-  sits outside `challenges/`.
+  `challenges/` and fails when two packages share an id or a package sits at
+  the repo root or in another top-level directory instead of under
+  `challenges/`.
 - `npm test`: the tests (`test/*.test.mjs`); their rules are in
   [docs/style/testing.md](docs/style/testing.md).
 - `npm run lint`: markdownlint over every Markdown file.

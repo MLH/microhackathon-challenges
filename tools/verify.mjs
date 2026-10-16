@@ -3,7 +3,7 @@
 // ids, packages outside challenges/, and unsafe symlinks.
 
 import { spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -88,13 +88,21 @@ function walkForPackages(root, bounds, directory, ancestors) {
   return found
 }
 
-/** Walks `root`/challenges, or returns nothing when it does not exist as a directory. */
+/**
+ * Walks `root`/challenges, or returns nothing when it does not exist as a
+ * directory or is a symlink that is unsafe (see {@link findUnsafeSymlinks},
+ * which reports it).
+ */
 function walkChallenges(root) {
   const challenges = path.join(root, CHALLENGES_DIRECTORY)
   const hasChallenges = existsSync(challenges) && statSync(challenges).isDirectory()
   if (!hasChallenges) return { packages: [], groupings: [] }
 
-  const bounds = { root: realpathSync(root), challenges: realpathSync(challenges) }
+  const realRoot = realpathSync(root)
+  const isUnsafeLink = lstatSync(challenges).isSymbolicLink() && explainUnsafeSymlink(realRoot, challenges) !== undefined
+  if (isUnsafeLink) return { packages: [], groupings: [] }
+
+  const bounds = { root: realRoot, challenges: realpathSync(challenges) }
 
   return walkForPackages(root, bounds, challenges, [])
 }

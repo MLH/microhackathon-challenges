@@ -103,6 +103,17 @@ test('reports a package at the root or in a top-level directory other than chall
   assert.deepEqual(strayManifests, ['challenge.json', 'challenges/challenge.json', 'stray/challenge.json'])
 }))
 
+test('finds duplicate ids across grouping folders and names both nested paths', () => withTemporaryRoot(async (root, challenges) => {
+  for (const packagePath of ['beginner/one', 'advanced/two']) {
+    await mkdir(path.join(challenges, packagePath), { recursive: true })
+    await writeFile(path.join(challenges, packagePath, 'challenge.json'), '{"id": "shared"}')
+  }
+
+  const duplicates = findDuplicateIds(findPackages(root))
+
+  assert.deepEqual(duplicates, [{ id: 'shared', names: ['challenges/advanced/two', 'challenges/beginner/one'] }])
+}))
+
 test('does not walk a symlink that leaves challenges/, even to a place inside the repo', () => withTemporaryRoot(async (root, challenges) => {
   const outsideRoot = await mkdtemp(path.join(tmpdir(), 'verify-outside-'))
   try {
@@ -270,6 +281,28 @@ test('CLI exits 1 naming an unsafe symlink inside a grouping folder under challe
   assert.equal(result.status, 1)
   assert.match(result.stderr, /^Unsafe symlink "challenges\/group\/link" -> \.\.\/\.\.\/\.\.: points outside the repo$/m)
 }))
+
+const unsafeChallengesLinkCases = [
+  { name: 'absolute', target: (outsideRoot) => outsideRoot },
+  { name: 'relative and pointing outside the repo', target: (outsideRoot, root) => path.relative(root, outsideRoot) },
+]
+
+for (const { name, target } of unsafeChallengesLinkCases) {
+  test(`CLI verifies nothing and exits 1 naming a challenges/ symlink that is ${name}`, () => withTemporaryDirectory(async (container) => {
+    const root = path.join(container, 'repo')
+    const outsideRoot = path.join(container, 'outside')
+    await mkdir(root)
+    await cp(path.join(fixtureRoot('ok'), 'challenges'), outsideRoot, { recursive: true })
+    await symlink(target(outsideRoot, root), path.join(root, 'challenges'))
+
+    const result = runCli(root)
+
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /^Unsafe symlink "challenges" -> .*: (has an absolute target|points outside the repo)$/m)
+    assert.match(result.stdout, /No challenge packages found/)
+    assert.doesNotMatch(result.stdout, /^ok /m)
+  }))
+}
 
 test('CLI exits 1 naming a dot-named top-level symlink', () => withTemporaryDirectory(async (root) => {
   await symlink('..', path.join(root, '.hidden'))

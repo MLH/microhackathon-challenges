@@ -1,8 +1,8 @@
 # microhackathon-challenges
 
-Portable challenge packages for MLH microhackathons. Each package under
-`challenges/` is one challenge package that boothstrap.sh stations and
-`boothstrap dev` can run. The repo is plain JavaScript (`.mjs`) on Node 26, and
+Portable challenge packages for MLH microhackathons. Challenge packages live
+under `challenges/`; each one runs on boothstrap.sh stations and with
+`boothstrap dev`. The repo is plain JavaScript (`.mjs`) on Node 26, and
 every PR is checked by the same package validator stations run.
 
 ## Autonomy
@@ -52,10 +52,11 @@ every PR is checked by the same package validator stations run.
   the repo root. The root `package.json` has one devDependency,
   `@mlhacks/boothstrap`, pinned exactly; bumping it is a one-line PR.
 - In-repo symlinks are followed: a symlinked directory under `challenges/`
-  holding a `challenge.json` is a package. A symlink at the repo root or under
-  `challenges/` that is absolute, dangling, looping, or points outside the
-  repo fails verify, as the station refuses it. `npm run lint` also lints
-  Markdown inside packages, so the house Markdown rules apply there.
+  holding a `challenge.json` is a package. A symlink at the repo root, in
+  `challenges/`, or in a grouping folder under it that is absolute, dangling,
+  looping, or points outside the repo fails verify, as the station refuses it.
+  `npm run lint` also lints Markdown inside packages, so the house Markdown
+  rules apply there.
 - `npm run verify` runs `boothstrap dev --verify` on every package. Add no rule
   the station doesn't enforce.
 - Test rules, including the network rule, are in
