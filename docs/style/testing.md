@@ -7,8 +7,10 @@ Apply this guide after [development.md](development.md).
 Test the flows users care about, not how the code is split. Cover what's
 essential, not every line. `npm test` runs `node --test 'test/*.test.mjs'`,
 so only top-level test files run and nothing under `test/fixtures/` does.
-Tests exercise the real entry point, such as `tools/verify.mjs`, against
-fixture repositories.
+`test/<id>.test.mjs` covers a challenge package's hooks, servers, and
+extensions, and `test/verify.test.mjs` covers `tools/verify.mjs`. Tests
+exercise the real entry point, such as `tools/verify.mjs`, against fixture
+repositories.
 
 | Tier | Proves | Lives in |
 | --- | --- | --- |
@@ -21,8 +23,9 @@ fixture repositories.
 - **Unit tests cover only pure logic,** such as package discovery and id
   checks, with no mocking. When many inputs matter, drive them from a table of
   input and expected output. Don't unit test wiring.
-- **Tests run offline.** No model calls, no credentials, no network. A test
-  that needs a package's dependencies uses a fixture that has none.
+- **Tests make no model calls and need no credentials.** The only network a
+  test may use is the npm registry, and only to run a package's `install`
+  hook; everything else stays offline.
 - **Fixtures live in `test/fixtures/`.** A fixture is a small repo layout with
   one challenge package per top-level directory; a fixture's Markdown is test
   data, not documentation.
