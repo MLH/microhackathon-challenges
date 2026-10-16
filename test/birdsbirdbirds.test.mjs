@@ -465,6 +465,22 @@ const sendRequest = ({ port, method = 'GET', requestPath = '/', headers = {}, bo
   request.end(body)
 })
 
+/**
+ * POSTs only the headers of a PNG upload claiming `contentLength` bytes and
+ * resolves `{ status }`, then drops the request. The server refuses from
+ * Content-Length alone; a client still writing the body can get EPIPE before
+ * it reads the answer, as on macOS.
+ */
+const postHeadersOnly = ({ port, contentLength }) => new Promise((resolve, reject) => {
+  const request = http.request({ host: '127.0.0.1', port, method: 'POST', path: '/bird.png', headers: { host: `127.0.0.1:${port}`, 'content-type': 'image/png', 'content-length': String(contentLength) } }, (response) => {
+    response.resume()
+    resolve({ status: response.statusCode })
+    request.destroy()
+  })
+  request.on('error', reject)
+  request.flushHeaders()
+})
+
 /** POSTs a PNG body to /bird.png; `headers` replace only the defaults a test is about. */
 const postBird = ({ port, body = TINY_PNG, headers = {}, requestPath = '/bird.png' }) => sendRequest({
   port,
@@ -492,11 +508,10 @@ test('the server saves a PNG upload as bird.png and writes nothing else', (testC
   assert.deepEqual(await readdir(workspace), ['bird.png'])
 }))
 
-test('the server refuses a body over the cap with 413 and saves nothing', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server refuses a Content-Length over the cap with 413 and saves nothing', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  const oversized = Buffer.concat([TINY_PNG, Buffer.alloc(MAX_PNG_BYTES)])
 
-  const response = await postBird({ port, body: oversized })
+  const response = await postHeadersOnly({ port, contentLength: TINY_PNG.length + MAX_PNG_BYTES })
 
   assert.equal(response.status, 413)
   assert.deepEqual(await readdir(workspace), [])
@@ -842,6 +857,9 @@ test('the bird label puts names in as text, never as HTML', () => {
 const WATCH_DEBOUNCE_MS = 50
 const WATCH_EVENT_TIMEOUT_MS = 3_000
 
+/** How long a test's first save waits for a report before saving again. */
+const WATCH_RESAVE_MS = 250
+
 /** Long enough after a write for any duplicate event to have been debounced and reported. */
 const WATCH_QUIET_MS = WATCH_DEBOUNCE_MS * 6
 
@@ -853,8 +871,8 @@ const waitQuietly = (milliseconds) => new Promise((resolve) => setTimeout(resolv
 
 /**
  * Records each call it is handed as a callback. `waitForCalls(count)`
- * resolves once that many calls arrived, and rejects after
- * WATCH_EVENT_TIMEOUT_MS otherwise.
+ * resolves once that many calls arrived, and rejects after `timeoutMs`
+ * (default WATCH_EVENT_TIMEOUT_MS) otherwise.
  */
 const callRecorder = () => {
   const calls = []
@@ -873,9 +891,9 @@ const callRecorder = () => {
       calls.push(args)
       wake()
     },
-    waitForCalls: (count) => new Promise((resolve, reject) => {
+    waitForCalls: (count, timeoutMs = WATCH_EVENT_TIMEOUT_MS) => new Promise((resolve, reject) => {
       const waiter = { count, resolve: () => finish(resolve) }
-      const timer = setTimeout(() => finish(() => reject(new Error(`expected ${count} calls, got ${calls.length} within ${WATCH_EVENT_TIMEOUT_MS} ms`))), WATCH_EVENT_TIMEOUT_MS)
+      const timer = setTimeout(() => finish(() => reject(new Error(`expected ${count} calls, got ${calls.length} within ${timeoutMs} ms`))), timeoutMs)
       /** Settles once. */
       const finish = (settle) => {
         clearTimeout(timer)
@@ -885,6 +903,24 @@ const callRecorder = () => {
       waiters.add(waiter)
       wake()
     }),
+  }
+}
+
+/**
+ * Runs `save` until `birdSaves` records its first call, saving again every
+ * WATCH_RESAVE_MS and giving up after WATCH_EVENT_TIMEOUT_MS. On macOS,
+ * fs.watch can miss a change made just after it starts. Saving the same
+ * drawing again must not be reported twice, which callers' counts check.
+ */
+const saveUntilReported = async (save, birdSaves) => {
+  const deadline = Date.now() + WATCH_EVENT_TIMEOUT_MS
+  for (;;) {
+    await save()
+    try {
+      return await birdSaves.waitForCalls(1, WATCH_RESAVE_MS)
+    } catch (error) {
+      if (Date.now() >= deadline) throw error
+    }
   }
 }
 
@@ -906,9 +942,8 @@ const startWatching = (testContext, workspace) => {
 test('the watcher reports a bird.png that appears, once', (testContext) => withWorkspace(async ({ workspace }) => {
   const { birdSaves, errors } = startWatching(testContext, workspace)
 
-  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+  await saveUntilReported(() => writeFile(path.join(workspace, 'bird.png'), TINY_PNG), birdSaves)
 
-  await birdSaves.waitForCalls(1)
   await waitQuietly(WATCH_QUIET_MS)
   assert.equal(birdSaves.calls.length, 1)
   assert.deepEqual(errors, [])
@@ -916,8 +951,7 @@ test('the watcher reports a bird.png that appears, once', (testContext) => withW
 
 test('the watcher reports bird.png again when it is redrawn', (testContext) => withWorkspace(async ({ workspace }) => {
   const { birdSaves } = startWatching(testContext, workspace)
-  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
-  await birdSaves.waitForCalls(1)
+  await saveUntilReported(() => writeFile(path.join(workspace, 'bird.png'), TINY_PNG), birdSaves)
 
   await writeFile(path.join(workspace, 'bird.png'), OTHER_DRAWING)
 
@@ -928,8 +962,7 @@ test('the watcher reports bird.png again when it is redrawn', (testContext) => w
 
 test('the watcher ignores a burst of rewrites with the same drawing', (testContext) => withWorkspace(async ({ workspace }) => {
   const { birdSaves } = startWatching(testContext, workspace)
-  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
-  await birdSaves.waitForCalls(1)
+  await saveUntilReported(() => writeFile(path.join(workspace, 'bird.png'), TINY_PNG), birdSaves)
 
   for (let rewrite = 0; rewrite < 3; rewrite += 1) await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
 
@@ -957,10 +990,8 @@ test('the watcher reports a save through the page server once, not its temp file
   const port = await startBirdServer(testContext, workspace)
   const { birdSaves, errors } = startWatching(testContext, workspace)
 
-  const response = await postBird({ port })
+  await saveUntilReported(async () => assert.equal((await postBird({ port })).status, 204), birdSaves)
 
-  assert.equal(response.status, 204)
-  await birdSaves.waitForCalls(1)
   await waitQuietly(WATCH_QUIET_MS)
   assert.equal(birdSaves.calls.length, 1)
   assert.deepEqual(errors, [])
