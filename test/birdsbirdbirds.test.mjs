@@ -845,7 +845,7 @@ const WATCH_EVENT_TIMEOUT_MS = 3_000
 /** Long enough after a write for any duplicate event to have been debounced and reported. */
 const WATCH_QUIET_MS = WATCH_DEBOUNCE_MS * 6
 
-/** A drawing whose bytes differ from TINY_PNG; the watcher only hashes, so it needn't be a valid PNG. */
+/** A second complete PNG, with a pixel that differs from TINY_PNG's; the watcher only counts complete PNGs. */
 const OTHER_DRAWING = onePixelPng([255, 0, 0, 255])
 
 /** Resolves after `milliseconds`; fs.watch runs in real time, so watcher tests wait for it to go quiet. */
@@ -1034,7 +1034,7 @@ test('the extension tells Pi about a saved bird during a session, and stops at s
 
   await waitQuietly(DEFAULT_DEBOUNCE_MS * 3)
   assert.deepEqual(pi.sent.calls, [[{
-    message: { customType: 'birdsbirdbirds', content: '[birdsbirdbirds] The participant saved their bird as bird.png. Read it, describe it, and report draw-bird.', display: false },
+    message: { customType: 'birdsbirdbirds', content: '[birdsbirdbirds] The participant saved their bird as bird.png. Read it, describe it, check it is family-friendly, and report draw-bird, following the Save message section of the start-challenge skill.', display: false },
     options: { triggerTurn: true, deliverAs: 'followUp' },
   }]])
 }))

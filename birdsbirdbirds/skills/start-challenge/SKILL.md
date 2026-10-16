@@ -42,6 +42,10 @@ starts (after `session_info`, when you have it): call `show_preview` with
 station's ask-first rule for `show_preview`, because the page is the
 challenge. Without `show_preview`, give them that URL to open right away.
 
+When you resume with `draw-bird` not yet complete, first use `bash` to check
+whether `bird.png` exists in the current directory: a save made just before
+a restart sends no message. If it exists, go straight to step 2.
+
 Tell them to draw any bird, then press Save. Saving tells you on its own, as
 a `[birdsbirdbirds]` message. If they say they saved but no message came, use
 `bash` to check that `bird.png` exists in the current directory; if it

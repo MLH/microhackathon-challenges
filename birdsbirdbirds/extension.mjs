@@ -11,7 +11,7 @@ import { watchWorkspace } from './bird-watcher.mjs'
 /** The `customType` of every message this extension sends. */
 export const MESSAGE_TYPE = 'birdsbirdbirds'
 
-export const BIRD_SAVED_MESSAGE = '[birdsbirdbirds] The participant saved their bird as bird.png. Read it, describe it, and report draw-bird.'
+export const BIRD_SAVED_MESSAGE = '[birdsbirdbirds] The participant saved their bird as bird.png. Read it, describe it, check it is family-friendly, and report draw-bird, following the Save message section of the start-challenge skill.'
 
 /** Watches the workspace from each session start until its shutdown. */
 export default function birdsbirdbirds(pi) {
