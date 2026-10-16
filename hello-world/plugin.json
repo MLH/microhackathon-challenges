@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "hello-world",
+  "version": "1.0.0",
+  "description": "A two-step introduction to making a file with an AI agent"
+}
