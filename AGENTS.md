@@ -54,7 +54,7 @@ by the same package validator stations run.
   Markdown rules apply there.
 - `npm run verify` runs `boothstrap dev --verify` on every package. Add no rule
   the station doesn't enforce.
-- Tests make no model calls and need no credentials; their network rule is in
+- Test rules, including the network rule, are in
   [docs/style/testing.md](docs/style/testing.md).
 
 ## Environment

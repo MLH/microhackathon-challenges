@@ -23,9 +23,8 @@ Node 26. It runs `npm ci`, then:
 
 - `npm run verify`: runs `boothstrap dev --verify` on every package and fails
   when two packages share an id.
-- `npm test`: the tests (`test/*.test.mjs`), which make no model calls and
-  need no credentials; see [docs/style/testing.md](docs/style/testing.md) for
-  their network rule.
+- `npm test`: the tests (`test/*.test.mjs`); their rules are in
+  [docs/style/testing.md](docs/style/testing.md).
 - `npm run lint`: markdownlint over every Markdown file.
 
 To run them locally, use Node ≥ 26.4 and, from the repository root:
