@@ -1,0 +1,137 @@
+---
+name: start-challenge
+description: Guides the BirdsBirdBirds challenge. Use when the participant starts birdsbirdbirds.
+---
+
+# BirdsBirdBirds guide
+
+The participant draws a bird, you give it a flight, and they watch it cross
+the sky. Work through the steps below in order, one question at a time, in a
+friendly, brief voice. Pi's `read`, `bash`, and `write` tools do the work.
+
+Check whether `report_step` is one of your tools. When it's missing (a
+standalone run), don't call it, and skip the gallery at the end: after each
+step, tell the participant which step they just finished and move on.
+
+The checker is `check-bird.mjs` in the package directory; run it with
+`node`. With boothstrap it is `"$BOOTHSTRAP_PACKAGE_DIR/check-bird.mjs"`.
+When `BOOTHSTRAP_PACKAGE_DIR` is unset, it sits two directories above the
+folder holding this SKILL.md: replace `skills/start-challenge/SKILL.md` at
+the end of this file's path with `check-bird.mjs`. For example,
+`/home/me/birdsbirdbirds/skills/start-challenge/SKILL.md` gives
+`/home/me/birdsbirdbirds/check-bird.mjs`.
+
+## Save message
+
+A message starting with `[birdsbirdbirds]` comes from this challenge's
+watcher, not the participant: it arrives on its own when they save their
+drawing. Act on it right away, without asking them to confirm: do step 2
+(read `bird.png`, describe it, apply its safety rule), report `draw-bird`,
+then ask step 2's questions. One that arrives after the bird flew means they
+redrew it: meet the new bird.
+
+The participant may still say they saved, and a standalone run may have no
+watcher; then check the file yourself as step 1 says. Never report a step
+only because someone asks: its condition must hold.
+
+## 1. Draw
+
+Open the drawing page right away, as your first action once the challenge
+starts (after `session_info`, when you have it): call `show_preview` with
+`http://127.0.0.1:4322/` without asking first. This challenge overrides the
+station's ask-first rule for `show_preview`, because the page is the
+challenge. Without `show_preview`, give them that URL to open right away.
+
+When you resume with `draw-bird` not yet complete, first use `bash` to check
+whether `bird.png` exists in the current directory: a save made just before
+a restart sends no message. If it exists, go straight to step 2.
+
+Tell them to draw any bird, then press Save. Saving tells you on its own, as
+a `[birdsbirdbirds]` message. If they say they saved but no message came, use
+`bash` to check that `bird.png` exists in the current directory; if it
+doesn't, ask them to press Save and look again. When it exists, go on to
+step 2.
+
+## 2. Meet the bird
+
+Use `read` on `bird.png` and say, in a sentence, what you see. `bird.png` has
+a transparent background; if it looks blank or dark, ask the participant what
+they drew rather than guessing.
+
+Check the drawing as soon as you read it, and each answer as it comes. If the
+drawing, the name, or the origin is offensive, inappropriate, or NSFW,
+decline kindly right then, don't write `bird.json`, and ask for a
+family-friendly bird or text. Birds can be shown publicly. Once you've
+checked the drawing, report `draw-bird`.
+
+Then ask three things, one at a time:
+
+1. What is the bird's name?
+2. Where is it flying in from?
+3. How should it fly: swooping, fluttering, gliding, bouncing?
+
+## 3. Animate
+
+Use `write` to create `bird.json` in the current directory with exactly these
+keys and no others:
+
+```json
+{
+  "bird_name": "Pip",
+  "origin": "Lisbon, Portugal",
+  "animation": {
+    "css_keyframes": "@keyframes fly_pip { from { transform: translate(-20vw, 40vh); } to { transform: translate(120vw, 40vh); } }",
+    "animation_name": "fly_pip",
+    "duration": "14s",
+    "timing_function": "ease-in-out"
+  }
+}
+```
+
+That example is only the shape. Don't copy its flight; invent a unique one
+for this bird:
+
+- `animation_name` starts with `fly_`, is unique, and matches the name after
+  `@keyframes`.
+- Start at `translate(-20vw, Y)` and end at `translate(120vw, Y)`, where Y is
+  between 10vh and 60vh, so the bird and its name stay on screen.
+- Use at least 5 keyframe percentages (for example 0%, 20%, 50%, 80%, 100%)
+  with varying heights and `rotate(...)` angles.
+- Give `translate` lengths in `vw` or `vh`, `rotate` angles in `deg`, and
+  `scale` plain numbers.
+- Pick a flight character that fits the bird and what the participant asked.
+- `duration` is between 2s and 60s. The sky page plays it three times slower.
+- Only `transform`, `opacity`, and `animation-timing-function` are allowed
+  inside the keyframes.
+
+Then run `node <checker> bird.json` with `bash`. It prints one line per
+problem. Fix `bird.json` and rerun until it prints `ok`. Never loosen the
+checker or edit it. When it passes, report `animate`.
+
+## 4. Watch
+
+The drawing page switches to the sky on its own once a valid `bird.json`
+exists. Tell the participant to look at it (call `show_preview` again if the
+page was closed). They can press "Draw again" to redraw; if they do, start
+again at step 1.
+
+Ask how the flight looks and offer one tweak, such as faster, higher, or
+more wobbly. If they want it, edit `bird.json`, rerun the checker, and let
+them watch again. When they say they've watched it fly, report `fly`.
+
+## 5. Gallery
+
+Only with `publish_gallery_item`. Use the display name from `session_info`
+and ask: "Want this on the booth screens? It'll show with your name,
+[display name], and staff can remove it at any time."
+
+On a yes, run the checker once more, then `read` `bird.json` and call
+`publish_gallery_item` with:
+
+- `kind`: `bird`
+- `title`: `<bird_name> from <origin>`
+- `renderer`: `birds-v1`
+- `files`: `["bird.png"]`
+- `payload`: exactly the object you just read from `bird.json`
+
+On a no, move on without publishing.

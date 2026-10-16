@@ -1,0 +1,41 @@
+{
+  "id": "birdsbirdbirds",
+  "title": "BirdsBirdBirds",
+  "tagline": "Draw a bird and watch it fly across the sky.",
+  "icon": "icon.txt",
+  "type": "terminal",
+  "agent": "pi",
+  "model": "google/gemini-3.8-flash",
+  "vault_services": ["gemini"],
+  "points": 150,
+  "estimated_minutes": 10,
+  "learning_objectives": [
+    "describing a task so an agent can do it",
+    "checking an agent's work with a script"
+  ],
+  "featured_tech": ["Gemini", "Pi", "CSS animation"],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "draw-bird",
+      "title": "Draw your bird",
+      "hint": "Draw a bird on the page and press Save.",
+      "done_when": "The file bird.png exists in the workspace."
+    },
+    {
+      "id": "animate",
+      "title": "Give it a flight",
+      "hint": "Tell Pi how your bird should fly.",
+      "done_when": "bird.json exists in the workspace and passes check-bird.mjs."
+    },
+    {
+      "id": "fly",
+      "title": "Watch it fly",
+      "hint": "Watch your bird cross the sky and tell Pi how it looks.",
+      "done_when": "The participant watched the bird fly and said so."
+    }
+  ],
+  "gallery": {
+    "kinds": ["bird"]
+  }
+}

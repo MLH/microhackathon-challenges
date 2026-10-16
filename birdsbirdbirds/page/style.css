@@ -1,0 +1,313 @@
+:root {
+  --slide-blue: #9ba9ef;
+  --slide-gray: #f6f7fa;
+  --slide-text: #3d3d3c;
+  --slide-lime: #d2fa4d;
+  --error: #b42318;
+  --success: #1e7b34;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family: var(--font);
+  color: var(--slide-text);
+  background: var(--slide-gray);
+}
+
+[hidden] {
+  display: none !important;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+
+button:focus-visible {
+  outline: 4px solid var(--slide-blue);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+#draw-mode {
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+.draw-header h1 {
+  margin: 0 0 6px;
+  font-size: 2.4rem;
+}
+
+.lead {
+  margin: 0 0 20px;
+  font-size: 1.15rem;
+}
+
+.draw-layout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  flex: 0 0 220px;
+}
+
+.tool-group {
+  margin: 0;
+  padding: 12px;
+  border: 2px solid var(--slide-text);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.tool-group legend {
+  padding: 0 6px;
+  font-weight: 700;
+}
+
+.swatches,
+.sizes,
+.tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.swatch {
+  width: 52px;
+  height: 52px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--slide-text);
+}
+
+.swatch[aria-pressed="true"] {
+  box-shadow: 0 0 0 4px var(--slide-text), 0 0 0 7px var(--slide-lime);
+}
+
+.size {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border: 2px solid var(--slide-text);
+  border-radius: 12px;
+  background: #fff;
+}
+
+.size[aria-pressed="true"],
+.tool-button[aria-pressed="true"] {
+  background: var(--slide-lime);
+}
+
+.size-dot {
+  display: block;
+  border-radius: 50%;
+  background: var(--slide-text);
+}
+
+.tool-button,
+.action-button {
+  flex: 1;
+  min-height: 52px;
+  padding: 8px 14px;
+  border: 2px solid var(--slide-text);
+  border-radius: 12px;
+  background: #fff;
+  font-size: 1.1rem;
+  font-weight: 700;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+}
+
+.canvas-column {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  flex: 1 1 512px;
+}
+
+.canvas-frame {
+  width: min(512px, 100%);
+  aspect-ratio: 1;
+  border: 3px solid var(--slide-text);
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 6px 6px 0 var(--slide-text);
+
+  /* A checkerboard shows the canvas is transparent. */
+  background-color: #fff;
+  background-image: conic-gradient(#e7e9f2 25%, transparent 0 50%, #e7e9f2 0 75%, transparent 0);
+  background-size: 32px 32px;
+}
+
+#drawing {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+#drawing.erasing {
+  cursor: cell;
+}
+
+.save-button {
+  min-width: 260px;
+  min-height: 64px;
+  padding: 12px 32px;
+  border: 3px solid var(--slide-text);
+  border-radius: 16px;
+  background: var(--slide-lime);
+  box-shadow: 4px 4px 0 var(--slide-text);
+  font-size: 1.5rem;
+  font-weight: 800;
+}
+
+.save-button:active:not(:disabled) {
+  transform: translate(2px, 2px);
+  box-shadow: 2px 2px 0 var(--slide-text);
+}
+
+.status {
+  min-height: 1.5em;
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.status[data-tone="success"] {
+  color: var(--success);
+}
+
+.status[data-tone="error"] {
+  color: var(--error);
+}
+
+.waiting {
+  margin: 0;
+  font-size: 1rem;
+  opacity: 0.7;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  font-size: 1.1rem;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+#sky-mode {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: var(--slide-blue);
+}
+
+#sky {
+  position: absolute;
+  inset: 0;
+}
+
+.sky-title {
+  position: absolute;
+  top: 32px;
+  left: 40px;
+  font-size: clamp(2rem, 6vw, 5rem);
+  font-weight: 800;
+  line-height: 1.1;
+  opacity: 0.85;
+}
+
+.bird-wrapper {
+  position: absolute;
+  /* The keyframes place the bird; translate(x, y) is measured from here. */
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  will-change: transform;
+}
+
+.bird {
+  display: block;
+  max-width: 240px;
+  max-height: 240px;
+  animation: flap 1.2s ease-in-out infinite alternate;
+  filter: contrast(1.1);
+}
+
+@keyframes flap {
+  0% {
+    transform: scaleY(1) scaleX(1) rotate(0deg);
+  }
+
+  100% {
+    transform: scaleY(0.93) scaleX(1.05) rotate(1.2deg);
+  }
+}
+
+.bird-label {
+  display: flex;
+  gap: 0.4em;
+  padding: 4px 12px;
+  border: 2px solid var(--slide-text);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 90%);
+  box-shadow: 2px 2px 0 var(--slide-lime);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.bird-label .origin {
+  font-weight: 500;
+}
+
+.draw-again-button {
+  position: absolute;
+  right: 28px;
+  bottom: 28px;
+  z-index: 200;
+  min-height: 60px;
+  padding: 10px 28px;
+  border: 3px solid var(--slide-text);
+  border-radius: 16px;
+  background: var(--slide-lime);
+  box-shadow: 4px 4px 0 var(--slide-text);
+  font-size: 1.3rem;
+  font-weight: 800;
+}
