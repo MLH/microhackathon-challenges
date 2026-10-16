@@ -11,10 +11,10 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { assemblePrompt, fillSentence, hasUnfilledBlank, isFinishedPrompt } from '../vibe-coding-mad-libs/prompt.mjs'
+import { assemblePrompt, fillSentence, hasUnfilledBlank, isFinishedPrompt } from '../challenges/vibe-coding-mad-libs/prompt.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
-const packageDirectory = path.join(testDirectory, '..', 'vibe-coding-mad-libs')
+const packageDirectory = path.join(testDirectory, '..', 'challenges', 'vibe-coding-mad-libs')
 const installTimeoutMilliseconds = 300_000
 const serverExitTimeoutMilliseconds = 5_000
 

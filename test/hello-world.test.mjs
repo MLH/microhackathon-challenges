@@ -11,7 +11,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
-const challengeDirectory = fileURLToPath(new URL('../hello-world/', import.meta.url))
+const challengeDirectory = fileURLToPath(new URL('../challenges/hello-world/', import.meta.url))
 
 /** Creates a temporary directory that is removed when the test ends. */
 const makeDirectory = async (context) => {

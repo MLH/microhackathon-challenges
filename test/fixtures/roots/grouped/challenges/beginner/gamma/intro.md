@@ -1,0 +1,3 @@
+# fixture-gamma
+
+Minimal fixture.
