@@ -54,7 +54,8 @@ by the same package validator stations run.
   Markdown rules apply there.
 - `npm run verify` runs `boothstrap dev --verify` on every package. Add no rule
   the station doesn't enforce.
-- Tests run offline, with no model calls and no credentials.
+- Test rules, including the network rule, are in
+  [docs/style/testing.md](docs/style/testing.md).
 
 ## Environment
 
@@ -85,9 +86,11 @@ by the same package validator stations run.
   `challenge.json` and its own `README.md`.
 - `tools/`: scripts run with `node`; `verify.mjs` runs the validator over every
   package.
-- `test/`: `*.test.mjs` files for `tools/`, run by `npm test` through
-  `node --test 'test/*.test.mjs'`; `test/fixtures/` holds fixture repos, whose
-  Markdown is test data.
+- `test/`: `*.test.mjs` files, run by `npm test` through
+  `node --test 'test/*.test.mjs'`. `test/<id>.test.mjs` covers each challenge
+  package's hooks, servers, and extensions; `test/verify.test.mjs` covers
+  `tools/verify.mjs`. `test/fixtures/` holds fixture repos, whose Markdown is
+  test data.
 - `docs/*.md`: undated guides, one per feature or setup, indexed in
   `README.md`.
 - `docs/style/`: how code, tests, and docs are written.
