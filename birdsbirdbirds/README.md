@@ -12,13 +12,27 @@ published to the booth screens as a `birds-v1` gallery item.
 | `challenge.json`, `plugin.json` | Manifest and Agent Plugin metadata |
 | `intro.md`, `icon.txt` | Intro screen text and tile icon |
 | `skills/start-challenge/SKILL.md` | The guide Pi follows |
+| `extension.mjs` | Pi extension: tells Pi about each saved drawing (see below) |
+| `bird-watcher.mjs` | Watches the workspace for a new `bird.png` |
 | `check-bird.mjs` | Checks `bird.json`; `node check-bird.mjs [path]` |
 | `server.mjs` | Local page server on `127.0.0.1:4322` |
 | `workspace-file.mjs` | Reads `bird.json` and `bird.png` only as capped regular files |
 | `setup`, `cleanup` | Start and stop the server (hooks in `hooks/`) |
 | `page/` | The drawing canvas and the sky |
 
-There is no `install` hook: the package has no dependencies beyond Node.
+There is no `install` hook: the package, extension included, has no
+dependencies beyond Node.
+
+## How steps advance
+
+Pi opens the drawing page with `show_preview` as soon as the challenge
+starts. The extension watches the workspace and sends Pi a hidden message
+starting with `[birdsbirdbirds]` when the participant saves a new `bird.png`.
+It starts a turn when Pi is idle and follows the current turn otherwise. The
+skill then reads the drawing and reports `draw-bird`, so nobody has to tell
+Pi they saved. A `bird.png` already in the workspace when Pi starts, and a
+save with the same content, send nothing. Pi writes `bird.json` and runs the
+checker itself, so `animate` needs no message.
 
 The server listens on port 4322. Set `BIRDSBIRDBIRDS_PORT` to use another
 port, though the skill and the challenge expect 4322.
@@ -40,6 +54,7 @@ Open `http://127.0.0.1:4322/`, then start Pi in the same folder:
 ```sh
 pi --model google/gemini-3.8-flash \
   --skill "$challenge"/skills/start-challenge/SKILL.md \
+  --extension "$challenge"/extension.mjs \
   '/skill:start-challenge'
 ```
 

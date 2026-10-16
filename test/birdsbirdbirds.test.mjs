@@ -1,7 +1,8 @@
 // Proves the birdsbirdbirds package: check-bird.mjs accepts real gallery
 // birds and rejects CSS that could escape the page's keyframes stylesheet; the
 // page server saves only PNGs to bird.png and serves only checked birds; the
-// setup and cleanup hooks start and stop it; the label never parses HTML.
+// setup and cleanup hooks start and stop it; the label never parses HTML; the
+// workspace watcher and its Pi extension report each new drawing once.
 
 import assert from 'node:assert/strict'
 import { execFile, spawn, spawnSync } from 'node:child_process'
@@ -16,7 +17,9 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateSync } from 'node:zlib'
 
+import { DEFAULT_DEBOUNCE_MS, watchWorkspace } from '../birdsbirdbirds/bird-watcher.mjs'
 import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../birdsbirdbirds/check-bird.mjs'
+import birdsbirdbirdsExtension from '../birdsbirdbirds/extension.mjs'
 import { createBirdLabel } from '../birdsbirdbirds/page/bird-label.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../birdsbirdbirds/server.mjs'
 
@@ -832,3 +835,187 @@ test('the bird label puts names in as text, never as HTML', () => {
     ['origin', '· <b>Durham</b>'],
   ])
 })
+
+const WATCH_DEBOUNCE_MS = 50
+const WATCH_EVENT_TIMEOUT_MS = 3_000
+
+/** Long enough after a write for any duplicate event to have been debounced and reported. */
+const WATCH_QUIET_MS = WATCH_DEBOUNCE_MS * 6
+
+/** A drawing whose bytes differ from TINY_PNG; the watcher only hashes, so it needn't be a valid PNG. */
+const OTHER_DRAWING = Buffer.concat([TINY_PNG, Buffer.from('another bird')])
+
+/** Resolves after `milliseconds`; fs.watch runs in real time, so watcher tests wait for it to go quiet. */
+const waitQuietly = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+/**
+ * Records each call it is handed as a callback. `waitForCalls(count)`
+ * resolves once that many calls arrived, and rejects after
+ * WATCH_EVENT_TIMEOUT_MS otherwise.
+ */
+const callRecorder = () => {
+  const calls = []
+  const waiters = new Set()
+
+  /** Resolves waiters whose count is reached. */
+  const wake = () => {
+    for (const waiter of waiters) {
+      if (calls.length >= waiter.count) waiter.resolve()
+    }
+  }
+
+  return {
+    calls,
+    record: (...args) => {
+      calls.push(args)
+      wake()
+    },
+    waitForCalls: (count) => new Promise((resolve, reject) => {
+      const waiter = { count, resolve: () => finish(resolve) }
+      const timer = setTimeout(() => finish(() => reject(new Error(`expected ${count} calls, got ${calls.length} within ${WATCH_EVENT_TIMEOUT_MS} ms`))), WATCH_EVENT_TIMEOUT_MS)
+      /** Settles once. */
+      const finish = (settle) => {
+        clearTimeout(timer)
+        waiters.delete(waiter)
+        settle()
+      }
+      waiters.add(waiter)
+      wake()
+    }),
+  }
+}
+
+/** Watches `workspace` for the rest of the test; resolves recorders for each callback and the watcher. */
+const startWatching = (testContext, workspace) => {
+  const birdSaves = callRecorder()
+  const errors = []
+  const watcher = watchWorkspace({
+    workspace,
+    onBirdSaved: birdSaves.record,
+    onError: (error) => errors.push(error),
+    debounceMs: WATCH_DEBOUNCE_MS,
+  })
+  testContext.after(() => watcher.stop())
+
+  return { watcher, birdSaves, errors }
+}
+
+test('the watcher reports a bird.png that appears, once', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { birdSaves, errors } = startWatching(testContext, workspace)
+
+  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+
+  await birdSaves.waitForCalls(1)
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 1)
+  assert.deepEqual(errors, [])
+}))
+
+test('the watcher reports bird.png again when it is redrawn', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { birdSaves } = startWatching(testContext, workspace)
+  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+  await birdSaves.waitForCalls(1)
+
+  await writeFile(path.join(workspace, 'bird.png'), OTHER_DRAWING)
+
+  await birdSaves.waitForCalls(2)
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 2)
+}))
+
+test('the watcher ignores a burst of rewrites with the same drawing', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { birdSaves } = startWatching(testContext, workspace)
+  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+  await birdSaves.waitForCalls(1)
+
+  for (let rewrite = 0; rewrite < 3; rewrite += 1) await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 1)
+}))
+
+test('the watcher reports a save through the page server once, not its temp file', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const { birdSaves, errors } = startWatching(testContext, workspace)
+
+  const response = await postBird({ port })
+
+  assert.equal(response.status, 204)
+  await birdSaves.waitForCalls(1)
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 1)
+  assert.deepEqual(errors, [])
+}))
+
+test('the watcher stays quiet about a bird.png already there when it starts', (testContext) => withWorkspace(async ({ workspace }) => {
+  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+
+  const { birdSaves } = startWatching(testContext, workspace)
+
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 0)
+}))
+
+test('the watcher does not report a bird.png symlink', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const outside = path.join(directory, 'outside.png')
+  await writeFile(outside, TINY_PNG)
+  const { birdSaves, errors } = startWatching(testContext, workspace)
+
+  await symlink(outside, path.join(workspace, 'bird.png'))
+
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 0)
+  assert.deepEqual(errors, [])
+}))
+
+test('the watcher reports nothing after it stops', (testContext) => withWorkspace(async ({ workspace }) => {
+  const { watcher, birdSaves } = startWatching(testContext, workspace)
+  watcher.stop()
+
+  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+
+  await waitQuietly(WATCH_QUIET_MS)
+  assert.equal(birdSaves.calls.length, 0)
+}))
+
+/** A fake of the slice of Pi's ExtensionAPI the extension uses: records handlers and sent messages. */
+const fakePi = () => {
+  const handlers = {}
+  const sent = callRecorder()
+
+  return {
+    handlers,
+    sent,
+    on: (eventName, handler) => {
+      handlers[eventName] = handler
+    },
+    sendMessage: (message, options) => sent.record({ message, options }),
+  }
+}
+
+/** A fake ExtensionContext for a session whose working directory is `workspace`. */
+const fakeContext = (workspace) => ({ cwd: workspace, mode: 'print', hasUI: false, ui: { notify: () => {} } })
+
+test('the extension tells Pi about a saved bird during a session, and stops at shutdown', (testContext) => withWorkspace(async ({ workspace }) => {
+  const savedWorkspace = process.env.BOOTHSTRAP_WORKSPACE
+  delete process.env.BOOTHSTRAP_WORKSPACE
+  testContext.after(() => {
+    if (savedWorkspace !== undefined) process.env.BOOTHSTRAP_WORKSPACE = savedWorkspace
+  })
+  const pi = fakePi()
+  birdsbirdbirdsExtension(pi)
+  const context = fakeContext(workspace)
+  await pi.handlers.session_start({ type: 'session_start', reason: 'startup' }, context)
+  testContext.after(() => pi.handlers.session_shutdown({ type: 'session_shutdown' }, context))
+
+  await writeFile(path.join(workspace, 'bird.png'), TINY_PNG)
+  await pi.sent.waitForCalls(1)
+  await pi.handlers.session_shutdown({ type: 'session_shutdown' }, context)
+  await writeFile(path.join(workspace, 'bird.png'), OTHER_DRAWING)
+
+  await waitQuietly(DEFAULT_DEBOUNCE_MS * 3)
+  assert.deepEqual(pi.sent.calls, [[{
+    message: { customType: 'birdsbirdbirds', content: '[birdsbirdbirds] The participant saved their bird as bird.png. Read it, describe it, and report draw-bird.', display: false },
+    options: { triggerTurn: true, deliverAs: 'followUp' },
+  }]])
+}))

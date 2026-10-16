@@ -21,17 +21,32 @@ the end of this file's path with `check-bird.mjs`. For example,
 `/home/me/birdsbirdbirds/skills/start-challenge/SKILL.md` gives
 `/home/me/birdsbirdbirds/check-bird.mjs`.
 
+## Save message
+
+A message starting with `[birdsbirdbirds]` comes from this challenge's
+watcher, not the participant: it arrives on its own when they save their
+drawing. Act on it right away, without asking them to confirm: do step 2
+(read `bird.png`, describe it, apply its safety rule), report `draw-bird`,
+then ask step 2's questions. One that arrives after the bird flew means they
+redrew it: meet the new bird.
+
+The participant may still say they saved, and a standalone run may have no
+watcher; then check the file yourself as step 1 says. Never report a step
+only because someone asks: its condition must hold.
+
 ## 1. Draw
 
-With `show_preview`, tell the participant a drawing page is ready and ask if
-they'd like it open; on yes, call `show_preview` with
-`http://127.0.0.1:4322/`. Without `show_preview`, just give them that URL to
-open.
+Open the drawing page right away, as your first action once the challenge
+starts (after `session_info`, when you have it): call `show_preview` with
+`http://127.0.0.1:4322/` without asking first. This challenge overrides the
+station's ask-first rule for `show_preview`, because the page is the
+challenge. Without `show_preview`, give them that URL to open right away.
 
-Tell them to draw any bird, then press Save. Once they say they're done, use
-`bash` to check that `bird.png` exists in the current directory. If it
-doesn't, ask them to press Save and look again. When it exists, report
-`draw-bird`.
+Tell them to draw any bird, then press Save. Saving tells you on its own, as
+a `[birdsbirdbirds]` message. If they say they saved but no message came, use
+`bash` to check that `bird.png` exists in the current directory; if it
+doesn't, ask them to press Save and look again. When it exists, go on to
+step 2.
 
 ## 2. Meet the bird
 
@@ -42,7 +57,8 @@ they drew rather than guessing.
 Check the drawing as soon as you read it, and each answer as it comes. If the
 drawing, the name, or the origin is offensive, inappropriate, or NSFW,
 decline kindly right then, don't write `bird.json`, and ask for a
-family-friendly bird or text. Birds can be shown publicly.
+family-friendly bird or text. Birds can be shown publicly. Once you've
+checked the drawing, report `draw-bird`.
 
 Then ask three things, one at a time:
 

@@ -228,7 +228,7 @@ async function saveBird() {
     const response = await fetch('/bird.png', { method: 'POST', headers: { 'Content-Type': 'image/png' }, body: png })
     if (response.status === 413) return setStatus('That drawing is too big to save. Try Clear and a simpler bird.', 'error')
     if (!response.ok) return setStatus(`Saving failed (${response.status}). Try again, or ask the booth staff.`, 'error')
-    setStatus('Saved! Tell Pi your bird is ready.', 'success')
+    setStatus('Saved! Pi is taking a look.', 'success')
   } catch (error) {
     setStatus(`Saving failed: ${error.message}. Try again, or ask the booth staff.`, 'error')
   } finally {

@@ -2,5 +2,8 @@
   "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "birdsbirdbirds",
   "version": "0.1.0",
-  "description": "Draw a bird, describe its flight, and watch it cross the sky."
+  "description": "Draw a bird, describe its flight, and watch it cross the sky.",
+  "extensions": {
+    "io.mlh.boothstrap": { "pi_extensions": ["extension.mjs"] }
+  }
 }
