@@ -3,5 +3,6 @@
 # versions boothstrap's Pi uses, into this package's node_modules.
 set -eu
 
-package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+# pwd -P resolves symlinks: npm ci fails on a --prefix that isn't a real path.
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 npm ci --ignore-scripts --no-audit --no-fund --prefix "$package_dir"
