@@ -9,7 +9,7 @@ import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { findDuplicateIds, findPackages, main } from '../tools/verify.mjs'
+import { findDuplicateIds, findPackages, findPackagesOutsideChallenges, main } from '../tools/verify.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const verifyScript = path.join(testDirectory, '..', 'tools', 'verify.mjs')
@@ -43,16 +43,69 @@ const withTemporaryDirectory = async (body) => {
   }
 }
 
-test('finds top-level directories, symlinked ones included, that hold a challenge.json', () => {
+/** Makes a fresh temporary repo root with an empty challenges/ directory, runs `body` with it, and removes it afterwards. */
+const withTemporaryRoot = (body) => withTemporaryDirectory(async (root) => {
+  await mkdir(path.join(root, 'challenges'))
+
+  return body(root, path.join(root, 'challenges'))
+})
+
+test('finds directories under challenges/, symlinked and nested ones included, that hold a challenge.json', () => {
   const names = findPackages(fixtureRoot('layout')).map((entry) => entry.name)
 
-  assert.deepEqual(names, ['linked-a', 'top-a', 'top-b'])
+  assert.deepEqual(names, ['challenges/holder/nested', 'challenges/linked-a', 'challenges/top-a', 'challenges/top-b'])
 })
+
+test('finds a package inside a grouping folder', () => {
+  const names = findPackages(fixtureRoot('grouped')).map((entry) => entry.name)
+
+  assert.deepEqual(names, ['challenges/beginner/gamma'])
+})
+
+test('finds no packages when there is no challenges/ directory', () => withTemporaryDirectory(async (root) => {
+  await mkdir(path.join(root, 'stray'))
+  await writeFile(path.join(root, 'stray', 'challenge.json'), '{"id": "stray"}')
+
+  const names = findPackages(root).map((entry) => entry.name)
+
+  assert.deepEqual(names, [])
+}))
+
+test('does not look inside a package, node_modules, or a dot-directory for more packages', () => withTemporaryRoot(async (_, challenges) => {
+  const manifestPaths = ['outer', 'outer/inner', 'node_modules/dependency', '.cache/entry', 'group/real']
+  for (const manifestPath of manifestPaths) {
+    await mkdir(path.join(challenges, manifestPath), { recursive: true })
+    await writeFile(path.join(challenges, manifestPath, 'challenge.json'), '{}')
+  }
+
+  const names = findPackages(path.dirname(challenges)).map((entry) => entry.name)
+
+  assert.deepEqual(names, ['challenges/group/real', 'challenges/outer'])
+}))
+
+test('does not walk forever through a symlink back to an ancestor directory', () => withTemporaryRoot(async (root, challenges) => {
+  await mkdir(path.join(challenges, 'group'))
+  await symlink('..', path.join(challenges, 'group', 'up'))
+
+  const names = findPackages(root).map((entry) => entry.name)
+
+  assert.deepEqual(names, [])
+}))
+
+test('reports a package at the root or in a top-level directory other than challenges/', () => withTemporaryRoot(async (root) => {
+  await writeFile(path.join(root, 'challenge.json'), '{}')
+  await mkdir(path.join(root, 'stray'))
+  await writeFile(path.join(root, 'stray', 'challenge.json'), '{}')
+
+  const strayManifests = findPackagesOutsideChallenges(root)
+
+  assert.deepEqual(strayManifests, ['challenge.json', 'stray/challenge.json'])
+}))
 
 test('reports packages that share a challenge id with the directories involved', () => {
   const packages = findPackages(fixtureRoot('duplicate'))
 
-  assert.deepEqual(findDuplicateIds(packages), [{ id: 'fixture-alpha', names: ['one', 'two'] }])
+  assert.deepEqual(findDuplicateIds(packages), [{ id: 'fixture-alpha', names: ['challenges/one', 'challenges/two'] }])
 })
 
 test('reports no duplicates when every id is unique', () => {
@@ -61,15 +114,15 @@ test('reports no duplicates when every id is unique', () => {
   assert.deepEqual(findDuplicateIds(packages), [])
 })
 
-test('skips a dangling top-level symlink', () => withTemporaryDirectory(async (root) => {
-  await symlink(path.join(root, 'gone'), path.join(root, 'dangling'))
+test('skips a dangling symlink under challenges/', () => withTemporaryRoot(async (root, challenges) => {
+  await symlink(path.join(challenges, 'gone'), path.join(challenges, 'dangling'))
 
   const names = findPackages(root).map((entry) => entry.name)
 
   assert.deepEqual(names, [])
 }))
 
-test('leaves a package with an unparseable or id-less manifest out of the duplicate check', () => withTemporaryDirectory(async (root) => {
+test('leaves a package with an unparseable or id-less manifest out of the duplicate check', () => withTemporaryRoot(async (root, challenges) => {
   const manifests = {
     first: '{"id": "shared"}',
     second: '{"id": "shared"}',
@@ -78,13 +131,13 @@ test('leaves a package with an unparseable or id-less manifest out of the duplic
     'numeric-id': '{"id": 7}',
   }
   for (const [name, manifest] of Object.entries(manifests)) {
-    await mkdir(path.join(root, name))
-    await writeFile(path.join(root, name, 'challenge.json'), manifest)
+    await mkdir(path.join(challenges, name))
+    await writeFile(path.join(challenges, name, 'challenge.json'), manifest)
   }
 
   const duplicates = findDuplicateIds(findPackages(root))
 
-  assert.deepEqual(duplicates, [{ id: 'shared', names: ['first', 'second'] }])
+  assert.deepEqual(duplicates, [{ id: 'shared', names: ['challenges/first', 'challenges/second'] }])
 }))
 
 test('exits 0 when every package verifies and ids are unique', () => {
@@ -94,6 +147,15 @@ test('exits 0 when every package verifies and ids are unique', () => {
 
   assert.equal(code, 0)
   assert.deepEqual(directories.map((dir) => path.basename(dir)), ['alpha', 'beta'])
+})
+
+test('exits 1 without verifying when a package sits outside challenges/', () => {
+  const { directories, verify } = fakeVerifier()
+
+  const code = main({ root: fixtureRoot('outside'), verify })
+
+  assert.equal(code, 1)
+  assert.deepEqual(directories.map((dir) => path.basename(dir)), ['alpha'])
 })
 
 test('exits 1 on duplicate ids even when every package verifies', () => {
@@ -130,11 +192,26 @@ test('CLI exits 1 for a package the real boothstrap rejects', () => {
   assert.match(result.stderr, /not a valid challenge package/)
 })
 
-test('CLI verifies a symlinked package and still reports the others after a failure', () => withTemporaryDirectory(async (root) => {
-  await cp(path.join(fixtureRoot('invalid'), 'broken'), path.join(root, 'broken'), { recursive: true })
-  await cp(path.join(fixtureRoot('ok'), 'alpha'), path.join(root, 'alpha'), { recursive: true })
-  await symlink('broken', path.join(root, 'a-broken'))
-  await symlink('alpha', path.join(root, 'b-alpha'))
+test('CLI exits 0 for a package in a grouping folder', () => {
+  const result = runCli(fixtureRoot('grouped'))
+
+  assert.equal(result.status, 0, result.stderr)
+  assert.match(result.stdout, /ok .*gamma/)
+})
+
+test('CLI exits 1 naming a package outside challenges/ while still verifying the others', () => {
+  const result = runCli(fixtureRoot('outside'))
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /^stray\/challenge\.json is outside challenges\/; move its package under challenges\/$/m)
+  assert.match(result.stdout, /ok .*alpha/)
+})
+
+test('CLI verifies a symlinked package and still reports the others after a failure', () => withTemporaryRoot(async (root, challenges) => {
+  await cp(path.join(fixtureRoot('invalid'), 'challenges', 'broken'), path.join(challenges, 'broken'), { recursive: true })
+  await cp(path.join(fixtureRoot('ok'), 'challenges', 'alpha'), path.join(challenges, 'alpha'), { recursive: true })
+  await symlink('broken', path.join(challenges, 'a-broken'))
+  await symlink('alpha', path.join(challenges, 'b-alpha'))
 
   const result = runCli(root)
 
@@ -164,6 +241,16 @@ for (const { name, setup, target, reason } of unsafeSymlinkCases) {
   }))
 }
 
+test('CLI exits 1 naming an unsafe symlink inside a grouping folder under challenges/', () => withTemporaryRoot(async (root, challenges) => {
+  await mkdir(path.join(challenges, 'group'))
+  await symlink('../../..', path.join(challenges, 'group', 'link'))
+
+  const result = runCli(root)
+
+  assert.equal(result.status, 1)
+  assert.match(result.stderr, /^Unsafe symlink "challenges\/group\/link" -> \.\.\/\.\.\/\.\.: points outside the repo$/m)
+}))
+
 test('CLI exits 1 naming a dot-named top-level symlink', () => withTemporaryDirectory(async (root) => {
   await symlink('..', path.join(root, '.hidden'))
 
@@ -177,7 +264,7 @@ test('CLI exits 1 and names the directories for duplicate ids', () => {
   const result = runCli(fixtureRoot('duplicate'))
 
   assert.equal(result.status, 1)
-  assert.match(result.stderr, /Duplicate challenge id "fixture-alpha" in: one, two/)
+  assert.match(result.stderr, /Duplicate challenge id "fixture-alpha" in: challenges\/one, challenges\/two/)
 })
 
 test('CLI rejects an unknown flag with a one-line message and no stack', () => {

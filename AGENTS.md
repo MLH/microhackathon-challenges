@@ -1,9 +1,9 @@
 # microhackathon-challenges
 
-Portable challenge packages for MLH microhackathons. Each top-level directory
-is one challenge package that boothstrap.sh stations and `boothstrap dev` can
-run. The repo is plain JavaScript (`.mjs`) on Node 26, and every PR is checked
-by the same package validator stations run.
+Portable challenge packages for MLH microhackathons. Each package under
+`challenges/` is one challenge package that boothstrap.sh stations and
+`boothstrap dev` can run. The repo is plain JavaScript (`.mjs`) on Node 26, and
+every PR is checked by the same package validator stations run.
 
 ## Autonomy
 
@@ -36,8 +36,11 @@ by the same package validator stations run.
 
 ## Challenge packages
 
-- Each top-level directory holding a `challenge.json` is one package, named
-  after its `id`. No two packages share an id.
+- Each directory under `challenges/` holding a `challenge.json` is one
+  package, named after its `id`; grouping folders such as
+  `challenges/beginner/<id>` are allowed. Event configs list `challenges/<id>`
+  (or the nested path). A `challenge.json` outside `challenges/` fails verify.
+  No two packages share an id.
 - The contract is boothstrap.sh's `docs/specs/2026-09-26-mvp-challenge-spec.md`,
   with `docs/authoring-challenges.md` for the workflow. The spec wins over this
   repo's docs. boothstrap.sh is internal: in a cloud session, attach
@@ -47,8 +50,9 @@ by the same package validator stations run.
 - A package's dependencies install through its own `install` hook, never at
   the repo root. The root `package.json` has one devDependency,
   `@mlhacks/boothstrap`, pinned exactly; bumping it is a one-line PR.
-- In-repo symlinks are followed: a symlinked top-level directory holding a
-  `challenge.json` is a package. A top-level symlink that is absolute,
+- In-repo symlinks are followed: a symlinked directory under `challenges/`
+  holding a `challenge.json` is a package. A symlink at the repo root or under
+  `challenges/` that is absolute,
   dangling, looping, or points outside the repo fails verify, as the station
   refuses it. `npm run lint` also lints Markdown inside packages, so the house
   Markdown rules apply there.
@@ -82,7 +86,7 @@ by the same package validator stations run.
 
 ## Project structure
 
-- `<id>/`: one challenge package per top-level directory, with a
+- `challenges/<id>/`: one challenge package per directory, with a
   `challenge.json` and its own `README.md`.
 - `tools/`: scripts run with `node`; `verify.mjs` runs the validator over every
   package.

@@ -1,5 +1,6 @@
-// Verifies every challenge package at the top level of the repo with the
-// station's own `boothstrap dev --verify`, and rejects duplicate challenge ids.
+// Verifies every challenge package under the repo's challenges/ directory with
+// the station's own `boothstrap dev --verify`, and rejects duplicate challenge
+// ids, packages outside challenges/, and unsafe symlinks.
 
 import { spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs'
@@ -17,6 +18,9 @@ function compareNames(left, right) {
   return 0
 }
 
+/** The directory, relative to the repo root, that holds every challenge package. */
+const CHALLENGES_DIRECTORY = 'challenges'
+
 /** Error codes for a symlink that dangles, loops, or runs through a file. */
 const BROKEN_LINK_CODES = ['ENOENT', 'ENOTDIR', 'ELOOP']
 
@@ -25,27 +29,88 @@ const BROKEN_LINK_CODES = ['ENOENT', 'ENOTDIR', 'ELOOP']
  * keeps in-repo symlinks. A broken symlink is not a directory; see
  * {@link findUnsafeSymlinks} for how it fails verification.
  */
-function isDirectoryFollowingSymlinks(root, entry) {
+function isDirectoryFollowingSymlinks(directory, entry) {
   try {
-    return statSync(path.join(root, entry.name)).isDirectory()
+    return statSync(path.join(directory, entry.name)).isDirectory()
   } catch (error) {
     if (BROKEN_LINK_CODES.includes(error.code)) return false
     throw error
   }
 }
 
+/** True when `directory` holds a challenge.json. */
+function holdsManifest(directory) {
+  return existsSync(path.join(directory, 'challenge.json'))
+}
+
+/** Lists the subdirectories of `directory`, symlinks to directories included, skipping dot-directories and node_modules. */
+function listSubdirectories(directory) {
+  return readdirSync(directory, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules')
+    .filter((entry) => isDirectoryFollowingSymlinks(directory, entry))
+    .map((entry) => entry.name)
+    .sort(compareNames)
+}
+
 /**
- * Lists the top-level directories of `root` (symlinks to directories
- * included) that hold a challenge.json, skipping dot-directories and
- * node_modules. Returns `{ dir, name }` sorted by name.
+ * Walks `directory` for packages and for the grouping directories between
+ * them. A directory holding a challenge.json is a package and is not entered;
+ * a directory that resolves to one of its own ancestors is not entered again.
+ * Returns `{ packages, groupings }`, where each package is `{ dir, name }`
+ * with `name` relative to `root`, and each grouping is a directory walked.
+ */
+function walkForPackages(root, directory, ancestors) {
+  const realDirectory = realpathSync(directory)
+  if (ancestors.includes(realDirectory)) return { packages: [], groupings: [] }
+
+  const found = { packages: [], groupings: [directory] }
+  for (const name of listSubdirectories(directory)) {
+    const child = path.join(directory, name)
+    if (holdsManifest(child)) {
+      found.packages.push({ dir: child, name: path.relative(root, child).split(path.sep).join('/') })
+      continue
+    }
+
+    const nested = walkForPackages(root, child, [...ancestors, realDirectory])
+    found.packages.push(...nested.packages)
+    found.groupings.push(...nested.groupings)
+  }
+
+  return found
+}
+
+/** Walks `root`/challenges, or returns nothing when it does not exist as a directory. */
+function walkChallenges(root) {
+  const challenges = path.join(root, CHALLENGES_DIRECTORY)
+  const hasChallenges = existsSync(challenges) && statSync(challenges).isDirectory()
+
+  return hasChallenges ? walkForPackages(root, challenges, []) : { packages: [], groupings: [] }
+}
+
+/**
+ * Lists the packages under `root`/challenges at any depth: directories
+ * (symlinks to directories included) that hold a challenge.json, skipping
+ * dot-directories and node_modules and never entering a package. Returns
+ * `{ dir, name }` sorted by name, where `name` is relative to `root`.
  */
 export function findPackages(root) {
-  return readdirSync(root, { withFileTypes: true })
-    .filter((entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules')
-    .filter((entry) => isDirectoryFollowingSymlinks(root, entry))
-    .filter((entry) => existsSync(path.join(root, entry.name, 'challenge.json')))
-    .map((entry) => ({ name: entry.name, dir: path.join(root, entry.name) }))
-    .sort((left, right) => compareNames(left.name, right.name))
+  return walkChallenges(root).packages.sort((left, right) => compareNames(left.name, right.name))
+}
+
+/**
+ * Lists the directories outside `root`/challenges that hold a challenge.json:
+ * `root` itself and its top-level directories (symlinks to directories
+ * included, dot-directories and node_modules skipped). A package there is
+ * invisible to the station, so each one fails verification. Returns the
+ * manifest paths relative to `root`.
+ */
+export function findPackagesOutsideChallenges(root) {
+  const strayDirectories = listSubdirectories(root).filter((name) => name !== CHALLENGES_DIRECTORY)
+  const strayManifests = strayDirectories
+    .filter((name) => holdsManifest(path.join(root, name)))
+    .map((name) => `${name}/challenge.json`)
+
+  return holdsManifest(root) ? ['challenge.json', ...strayManifests] : strayManifests
 }
 
 /** True when `candidate` is `parent` or lies beneath it. */
@@ -55,7 +120,7 @@ function isInside(parent, candidate) {
   return !relative.startsWith('..') && !path.isAbsolute(relative)
 }
 
-/** Explains why a top-level symlink is unsafe, or returns undefined when it is fine. */
+/** Explains why a symlink is unsafe, or returns undefined when it is fine. */
 function explainUnsafeSymlink(realRoot, linkPath) {
   if (path.isAbsolute(readlinkSync(linkPath))) return 'has an absolute target'
 
@@ -71,21 +136,24 @@ function explainUnsafeSymlink(realRoot, linkPath) {
 }
 
 /**
- * Lists the top-level symlinks of `root` that the station refuses to unpack:
- * absolute, dangling, looping, or resolving outside `root`. Returns one
- * message per link, naming it and its target.
+ * Lists the symlinks directly inside `root` and inside every directory walked
+ * under `root`/challenges that the station refuses to unpack: absolute,
+ * dangling, looping, or resolving outside `root`. Returns one message per
+ * link, naming it relative to `root` and its target.
  */
 export function findUnsafeSymlinks(root) {
   const realRoot = realpathSync(root)
+  const walkedDirectories = [root, ...walkChallenges(root).groupings]
 
-  return readdirSync(root, { withFileTypes: true })
+  return walkedDirectories.flatMap((directory) => readdirSync(directory, { withFileTypes: true })
     .filter((entry) => entry.isSymbolicLink() && entry.name !== 'node_modules')
     .flatMap((entry) => {
-      const linkPath = path.join(root, entry.name)
+      const linkPath = path.join(directory, entry.name)
       const reason = explainUnsafeSymlink(realRoot, linkPath)
+      const displayName = path.relative(root, linkPath).split(path.sep).join('/')
 
-      return reason === undefined ? [] : [`Unsafe symlink "${entry.name}" -> ${readlinkSync(linkPath)}: ${reason}`]
-    })
+      return reason === undefined ? [] : [`Unsafe symlink "${displayName}" -> ${readlinkSync(linkPath)}: ${reason}`]
+    }))
 }
 
 /**
@@ -136,18 +204,24 @@ export function verifyWithBoothstrap(packageDirs, binary = boothstrapBin) {
 }
 
 /**
- * Verifies all packages under `root` and returns the process exit code:
- * 0 when every package verifies, ids are unique and no top-level symlink is
- * unsafe (or no packages exist), else 1.
+ * Verifies all packages under `root`/challenges and returns the process exit
+ * code: 0 when every package verifies, ids are unique, no package sits outside
+ * challenges/ and no symlink is unsafe (or no packages exist), else 1.
  */
 export function main({ root = repoRoot, verify = verifyWithBoothstrap } = {}) {
   const unsafeSymlinks = findUnsafeSymlinks(root)
   for (const message of unsafeSymlinks) console.error(message)
 
+  const strayManifests = findPackagesOutsideChallenges(root)
+  for (const manifest of strayManifests) {
+    console.error(`${manifest} is outside ${CHALLENGES_DIRECTORY}/; move its package under ${CHALLENGES_DIRECTORY}/`)
+  }
+
+  const structureIsValid = unsafeSymlinks.length === 0 && strayManifests.length === 0
   const packages = findPackages(root)
   if (packages.length === 0) {
     console.log('No challenge packages found.')
-    return unsafeSymlinks.length === 0 ? 0 : 1
+    return structureIsValid ? 0 : 1
   }
 
   const allVerified = verify(packages.map(({ dir }) => dir))
@@ -156,7 +230,7 @@ export function main({ root = repoRoot, verify = verifyWithBoothstrap } = {}) {
     console.error(`Duplicate challenge id "${id}" in: ${names.join(', ')}`)
   }
 
-  return allVerified && duplicates.length === 0 && unsafeSymlinks.length === 0 ? 0 : 1
+  return allVerified && duplicates.length === 0 && structureIsValid ? 0 : 1
 }
 
 /** Signals a bad command line; the CLI prints its message without a stack. */

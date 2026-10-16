@@ -5,7 +5,7 @@
     // Its placeholders read as HTML, and it opens without a heading by design.
     ".github/pull_request_template.md",
     // The challenge spec bars a title in intro.md; the Intro screen shows it from the manifest.
-    "*/intro.md",
+    "challenges/**/intro.md",
     // Fixture Markdown is test data, not documentation.
     "test/fixtures/**",
     "**/node_modules/**"

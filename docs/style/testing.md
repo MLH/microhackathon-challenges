@@ -27,8 +27,8 @@ repositories.
   test may use is the npm registry, and only to run a package's `install`
   hook; everything else stays offline.
 - **Fixtures live in `test/fixtures/`.** A fixture is a small repo layout with
-  one challenge package per top-level directory; a fixture's Markdown is test
-  data, not documentation.
+  one challenge package per directory under its `challenges/`; a fixture's
+  Markdown is test data, not documentation.
 - **`test/fixtures/canary.test.mjs` throws if executed.** It proves the test
   glob skips fixtures; keep fixture files out of top-level `test/*.test.mjs`.
 - **A test's path mirrors the file or flow it covers.**

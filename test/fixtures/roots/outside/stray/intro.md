@@ -1,0 +1,3 @@
+# fixture-stray
+
+Minimal fixture.

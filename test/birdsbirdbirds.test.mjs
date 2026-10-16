@@ -17,14 +17,14 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateSync } from 'node:zlib'
 
-import { DEFAULT_DEBOUNCE_MS, watchWorkspace } from '../birdsbirdbirds/bird-watcher.mjs'
-import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../birdsbirdbirds/check-bird.mjs'
-import birdsbirdbirdsExtension from '../birdsbirdbirds/extension.mjs'
-import { createBirdLabel } from '../birdsbirdbirds/page/bird-label.mjs'
-import { createBirdServer, MAX_PNG_BYTES } from '../birdsbirdbirds/server.mjs'
+import { DEFAULT_DEBOUNCE_MS, watchWorkspace } from '../challenges/birdsbirdbirds/bird-watcher.mjs'
+import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../challenges/birdsbirdbirds/check-bird.mjs'
+import birdsbirdbirdsExtension from '../challenges/birdsbirdbirds/extension.mjs'
+import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
+import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
-const packageDirectory = path.join(testDirectory, '..', 'birdsbirdbirds')
+const packageDirectory = path.join(testDirectory, '..', 'challenges', 'birdsbirdbirds')
 const checkerScript = path.join(packageDirectory, 'check-bird.mjs')
 const serverScript = path.join(packageDirectory, 'server.mjs')
 

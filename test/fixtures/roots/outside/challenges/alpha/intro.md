@@ -1,0 +1,3 @@
+# fixture-alpha
+
+Minimal fixture.
