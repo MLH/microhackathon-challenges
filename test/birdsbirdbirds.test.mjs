@@ -465,6 +465,37 @@ const sendRequest = ({ port, method = 'GET', requestPath = '/', headers = {}, bo
   request.end(body)
 })
 
+/**
+ * Streams a chunked PNG upload over a raw socket until the server closes the
+ * connection or `maxBytes` have gone out, and resolves `{ status, dropped }`.
+ * `dropped` is true when the connection closed before the upload finished.
+ * A raw socket, since Node's HTTP client stops sending once it has a whole
+ * answer, and a browser doesn't.
+ */
+const streamUntilDropped = ({ port, maxBytes }) => new Promise((resolve) => {
+  const chunk = Buffer.alloc(64 * 1024)
+  const chunkFrame = Buffer.concat([Buffer.from(`${chunk.length.toString(16)}\r\n`), chunk, Buffer.from('\r\n')])
+  const socket = net.connect(port, '127.0.0.1')
+  let received = ''
+  let sentBytes = 0
+
+  /** Writes chunks until the socket pushes back or the cap is reached, then ends the body. */
+  const writeMore = () => {
+    while (sentBytes < maxBytes) {
+      sentBytes += chunk.length
+      if (!socket.write(chunkFrame)) return socket.once('drain', writeMore)
+    }
+    socket.end('0\r\n\r\n')
+  }
+
+  socket.setEncoding('latin1')
+  socket.on('data', (text) => { received += text })
+  socket.on('error', () => undefined)
+  socket.on('close', () => resolve({ status: Number(/^HTTP\/1\.1 (\d{3})/.exec(received)?.[1]), dropped: !socket.writableFinished }))
+  socket.write(`POST /bird.png HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\nContent-Type: image/png\r\nTransfer-Encoding: chunked\r\n\r\n`)
+  writeMore()
+})
+
 /** POSTs a PNG body to /bird.png; `headers` replace only the defaults a test is about. */
 const postBird = ({ port, body = TINY_PNG, headers = {}, requestPath = '/bird.png' }) => sendRequest({
   port,
@@ -509,6 +540,26 @@ test('the server refuses a streamed body once it passes the cap, with no Content
   const response = await sendRequest({ port, method: 'POST', requestPath: '/bird.png', headers: { 'content-type': 'image/png', 'transfer-encoding': 'chunked' }, body: oversized })
 
   assert.equal(response.status, 413)
+  assert.deepEqual(await readdir(workspace), [])
+}))
+
+test('the server lets an oversized upload finish sending and answers 413', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const oversized = Buffer.concat([TINY_PNG, Buffer.alloc(3 * MAX_PNG_BYTES)])
+
+  const response = await postBird({ port, body: oversized })
+
+  assert.equal(response.status, 413)
+  assert.deepEqual(await readdir(workspace), [])
+}))
+
+test('the server drops an oversized upload that keeps sending past the discard limit', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+
+  const upload = await streamUntilDropped({ port, maxBytes: 64 * MAX_PNG_BYTES })
+
+  assert.equal(upload.status, 413)
+  assert.equal(upload.dropped, true)
   assert.deepEqual(await readdir(workspace), [])
 }))
 
