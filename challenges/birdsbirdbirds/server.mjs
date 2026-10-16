@@ -20,6 +20,9 @@ export const DEFAULT_PORT = 4322
 export const MAX_PNG_BYTES = 2 * 1024 * 1024
 export const PORT_BUSY_EXIT_CODE = 3
 
+/** How much of a refused upload the server reads and discards before it drops the connection. */
+const MAX_DISCARDED_BYTES = 4 * MAX_PNG_BYTES
+
 const LISTEN_HOST = '127.0.0.1'
 const PAGE_DIRECTORY = path.join(path.dirname(fileURLToPath(import.meta.url)), 'page')
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
@@ -157,10 +160,21 @@ async function saveBird({ request, response, workspace, port }) {
   send(response, 204)
 }
 
-/** Answers 413 and drops the connection once the answer is out, so the rest of the body is never read. */
+/**
+ * Answers 413, then reads and discards the rest of the body, so the client
+ * can finish sending and read the answer. Closing on a client that is still
+ * sending can make it see a reset instead, unless it reads answers that
+ * arrive mid-upload as Chromium does. Drops the connection once more than
+ * MAX_DISCARDED_BYTES arrive, so an endless upload can't hold it open.
+ */
 function refuseOversizedBody(request, response) {
-  response.setHeader('Connection', 'close')
-  response.on('finish', () => request.destroy())
+  let discardedBytes = 0
+  request.on('data', (chunk) => {
+    discardedBytes += chunk.length
+    if (discardedBytes > MAX_DISCARDED_BYTES) request.destroy()
+  })
+  // readBodyWithin pauses the body when it gives up; a paused stream stays paused when a listener is added.
+  request.resume()
   sendText(response, 413, `the image is over ${MAX_PNG_BYTES} bytes`)
 }
 
