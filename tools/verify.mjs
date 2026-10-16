@@ -43,35 +43,44 @@ function holdsManifest(directory) {
   return existsSync(path.join(directory, 'challenge.json'))
 }
 
-/** Lists the subdirectories of `directory`, symlinks to directories included, skipping dot-directories and node_modules. */
+/**
+ * Lists the subdirectories of `directory`, symlinks to directories included,
+ * skipping dot-directories and node_modules. Each is `{ name, isSymlink }`.
+ */
 function listSubdirectories(directory) {
   return readdirSync(directory, { withFileTypes: true })
     .filter((entry) => !entry.name.startsWith('.') && entry.name !== 'node_modules')
     .filter((entry) => isDirectoryFollowingSymlinks(directory, entry))
-    .map((entry) => entry.name)
-    .sort(compareNames)
+    .map((entry) => ({ name: entry.name, isSymlink: entry.isSymbolicLink() }))
+    .sort((left, right) => compareNames(left.name, right.name))
 }
 
 /**
  * Walks `directory` for packages and for the grouping directories between
- * them. A directory holding a challenge.json is a package and is not entered;
- * a directory that resolves to one of its own ancestors is not entered again.
- * Returns `{ packages, groupings }`, where each package is `{ dir, name }`
- * with `name` relative to `root`, and each grouping is a directory walked.
+ * them, within `bounds` (`{ root, challenges }`, both real paths). A directory
+ * holding a challenge.json is a package and is not entered. Unsafe symlinks
+ * are never followed (see {@link findUnsafeSymlinks}, which reports them), a
+ * grouping directory must resolve inside the real challenges/ directory, and
+ * one that resolves to its own ancestor is not entered again. Returns
+ * `{ packages, groupings }`, where each package is `{ dir, name }` with
+ * `name` relative to `root`, and each grouping is a directory walked.
  */
-function walkForPackages(root, directory, ancestors) {
+function walkForPackages(root, bounds, directory, ancestors) {
   const realDirectory = realpathSync(directory)
   if (ancestors.includes(realDirectory)) return { packages: [], groupings: [] }
 
   const found = { packages: [], groupings: [directory] }
-  for (const name of listSubdirectories(directory)) {
+  for (const { name, isSymlink } of listSubdirectories(directory)) {
     const child = path.join(directory, name)
+    if (isSymlink && explainUnsafeSymlink(bounds.root, child) !== undefined) continue
+
     if (holdsManifest(child)) {
       found.packages.push({ dir: child, name: path.relative(root, child).split(path.sep).join('/') })
       continue
     }
+    if (!isInside(bounds.challenges, realpathSync(child))) continue
 
-    const nested = walkForPackages(root, child, [...ancestors, realDirectory])
+    const nested = walkForPackages(root, bounds, child, [...ancestors, realDirectory])
     found.packages.push(...nested.packages)
     found.groupings.push(...nested.groupings)
   }
@@ -83,8 +92,11 @@ function walkForPackages(root, directory, ancestors) {
 function walkChallenges(root) {
   const challenges = path.join(root, CHALLENGES_DIRECTORY)
   const hasChallenges = existsSync(challenges) && statSync(challenges).isDirectory()
+  if (!hasChallenges) return { packages: [], groupings: [] }
 
-  return hasChallenges ? walkForPackages(root, challenges, []) : { packages: [], groupings: [] }
+  const bounds = { root: realpathSync(root), challenges: realpathSync(challenges) }
+
+  return walkForPackages(root, bounds, challenges, [])
 }
 
 /**
@@ -98,19 +110,27 @@ export function findPackages(root) {
 }
 
 /**
- * Lists the directories outside `root`/challenges that hold a challenge.json:
- * `root` itself and its top-level directories (symlinks to directories
- * included, dot-directories and node_modules skipped). A package there is
- * invisible to the station, so each one fails verification. Returns the
- * manifest paths relative to `root`.
+ * Lists the challenge.json files that sit where the station will not look:
+ * directly in `root`, directly in `root`/challenges, or in a top-level
+ * directory of `root` other than challenges (symlinks to directories
+ * included, dot-directories and node_modules skipped). Deeper strays are not
+ * found, because test fixtures legitimately hold manifests there. Each one
+ * fails verification. Returns the manifest paths relative to `root`.
  */
 export function findPackagesOutsideChallenges(root) {
-  const strayDirectories = listSubdirectories(root).filter((name) => name !== CHALLENGES_DIRECTORY)
+  const strayDirectories = listSubdirectories(root)
+    .map(({ name }) => name)
+    .filter((name) => name !== CHALLENGES_DIRECTORY)
   const strayManifests = strayDirectories
     .filter((name) => holdsManifest(path.join(root, name)))
     .map((name) => `${name}/challenge.json`)
+  const challenges = path.join(root, CHALLENGES_DIRECTORY)
+  const directStrays = [
+    ...(holdsManifest(root) ? ['challenge.json'] : []),
+    ...(holdsManifest(challenges) ? [`${CHALLENGES_DIRECTORY}/challenge.json`] : []),
+  ]
 
-  return holdsManifest(root) ? ['challenge.json', ...strayManifests] : strayManifests
+  return [...directStrays, ...strayManifests]
 }
 
 /** True when `candidate` is `parent` or lies beneath it. */

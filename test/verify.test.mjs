@@ -94,12 +94,32 @@ test('does not walk forever through a symlink back to an ancestor directory', ()
 
 test('reports a package at the root or in a top-level directory other than challenges/', () => withTemporaryRoot(async (root) => {
   await writeFile(path.join(root, 'challenge.json'), '{}')
+  await writeFile(path.join(root, 'challenges', 'challenge.json'), '{}')
   await mkdir(path.join(root, 'stray'))
   await writeFile(path.join(root, 'stray', 'challenge.json'), '{}')
 
   const strayManifests = findPackagesOutsideChallenges(root)
 
-  assert.deepEqual(strayManifests, ['challenge.json', 'stray/challenge.json'])
+  assert.deepEqual(strayManifests, ['challenge.json', 'challenges/challenge.json', 'stray/challenge.json'])
+}))
+
+test('does not walk a symlink that leaves challenges/, even to a place inside the repo', () => withTemporaryRoot(async (root, challenges) => {
+  const outsideRoot = await mkdtemp(path.join(tmpdir(), 'verify-outside-'))
+  try {
+    await mkdir(path.join(outsideRoot, 'evil'))
+    await writeFile(path.join(outsideRoot, 'evil', 'challenge.json'), '{}')
+    await mkdir(path.join(root, 'test', 'fixture'), { recursive: true })
+    await writeFile(path.join(root, 'test', 'fixture', 'challenge.json'), '{}')
+    await mkdir(path.join(challenges, 'group'))
+    await symlink(outsideRoot, path.join(challenges, 'group', 'outside'))
+    await symlink('../../test', path.join(challenges, 'group', 'inside'))
+
+    const names = findPackages(root).map((entry) => entry.name)
+
+    assert.deepEqual(names, [])
+  } finally {
+    await rm(outsideRoot, { recursive: true, force: true })
+  }
 }))
 
 test('reports packages that share a challenge id with the directories involved', () => {
@@ -149,7 +169,7 @@ test('exits 0 when every package verifies and ids are unique', () => {
   assert.deepEqual(directories.map((dir) => path.basename(dir)), ['alpha', 'beta'])
 })
 
-test('exits 1 without verifying when a package sits outside challenges/', () => {
+test('exits 1 when a package sits outside challenges/, still verifying the rest', () => {
   const { directories, verify } = fakeVerifier()
 
   const code = main({ root: fixtureRoot('outside'), verify })

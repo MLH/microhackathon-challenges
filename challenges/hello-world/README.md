@@ -10,7 +10,7 @@ package has no `install` hook, no Pi extensions, and no MCP servers. Export
 `GEMINI_API_KEY`, then set the package path:
 
 ```sh
-challenge=/absolute/path/to/microhackathon-challenges/hello-world
+challenge=/absolute/path/to/microhackathon-challenges/challenges/hello-world
 ```
 
 Install Pi and the adapter, at the versions boothstrap pins:
@@ -26,7 +26,7 @@ Load the package by adding its absolute path to `settings.agentPluginPaths` in
 ```json
 {
   "settings": {
-    "agentPluginPaths": ["/absolute/path/to/microhackathon-challenges/hello-world"]
+    "agentPluginPaths": ["/absolute/path/to/microhackathon-challenges/challenges/hello-world"]
   }
 }
 ```

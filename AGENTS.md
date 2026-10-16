@@ -39,7 +39,8 @@ every PR is checked by the same package validator stations run.
 - Each directory under `challenges/` holding a `challenge.json` is one
   package, named after its `id`; grouping folders such as
   `challenges/beginner/<id>` are allowed. Event configs list `challenges/<id>`
-  (or the nested path). A `challenge.json` outside `challenges/` fails verify.
+  (or the nested path). A `challenge.json` at the repo root, directly in
+  `challenges/`, or in another top-level directory fails verify.
   No two packages share an id.
 - The contract is boothstrap.sh's `docs/specs/2026-09-26-mvp-challenge-spec.md`,
   with `docs/authoring-challenges.md` for the workflow. The spec wins over this
@@ -52,10 +53,9 @@ every PR is checked by the same package validator stations run.
   `@mlhacks/boothstrap`, pinned exactly; bumping it is a one-line PR.
 - In-repo symlinks are followed: a symlinked directory under `challenges/`
   holding a `challenge.json` is a package. A symlink at the repo root or under
-  `challenges/` that is absolute,
-  dangling, looping, or points outside the repo fails verify, as the station
-  refuses it. `npm run lint` also lints Markdown inside packages, so the house
-  Markdown rules apply there.
+  `challenges/` that is absolute, dangling, looping, or points outside the
+  repo fails verify, as the station refuses it. `npm run lint` also lints
+  Markdown inside packages, so the house Markdown rules apply there.
 - `npm run verify` runs `boothstrap dev --verify` on every package. Add no rule
   the station doesn't enforce.
 - Test rules, including the network rule, are in
