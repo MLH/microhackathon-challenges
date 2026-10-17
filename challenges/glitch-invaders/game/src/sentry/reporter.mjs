@@ -1,6 +1,6 @@
 /**
  * Live reporting through Sentry's envelope endpoint for the DSN: one real error event for the weapon
- * jam, one for the shield failure, and a span trace for the boss spawn, each tagged with the run and
+ * jam, one for the shield failure, and a transaction trace for the boss spawn, each tagged with the run and
  * the bug. It needs only the public DSN, so no token is ever on the page; the page server reads
  * back what Sentry recorded. No SDK is loaded: the page's CSP allows scripts from itself alone.
  */
@@ -44,11 +44,6 @@ export function parseDsn(dsn) {
 /** One envelope: a header line, then an item header and payload line per item. */
 function envelope(header, itemHeader, payload) {
   return `${JSON.stringify(header)}\n${JSON.stringify(itemHeader)}\n${JSON.stringify(payload)}\n`;
-}
-
-/** A typed attribute of a v2 span item. */
-function attribute(value, type = 'string') {
-  return { value, type };
 }
 
 /** Sends the game's intentional failures to Sentry, once per bug. */
@@ -167,52 +162,28 @@ export class SentryReporter {
   }
 
   /**
-   * The span envelope for the boss `stall`: a `boss-spawn` root span and one child per load, timed
-   * as the run measured them and ending now.
+   * The transaction envelope for the boss `stall`: a `boss-spawn` transaction with one child span
+   * per load, timed as the run measured them and ending now.
    */
   traceEnvelope(traceId, stall) {
+    const eventId = randomHex(32);
     const rootSpanId = randomHex(16);
     const endSeconds = Date.now() / 1_000;
     const startSeconds = endSeconds - stall.totalMs / 1_000;
-    const common = (name, spanId) => ({
-      name,
-      span_id: spanId,
-      trace_id: traceId,
-      status: 'ok',
-    });
-    const commonAttributes = {
-      'sentry.origin': attribute('manual'),
-      'sentry.segment.name': attribute('boss-spawn'),
-      'sentry.segment.id': attribute(rootSpanId),
-      'sentry.release': attribute(RELEASE),
-      'sentry.sdk.name': attribute(SDK.name),
-      'sentry.sdk.version': attribute(SDK.version),
-    };
-    const children = stall.spans.map((span) => ({
-      ...common(span.name, randomHex(16)),
+    const spans = stall.spans.map((span) => ({
+      span_id: randomHex(16),
       parent_span_id: rootSpanId,
+      trace_id: traceId,
+      op: span.operation,
+      description: span.name,
       start_timestamp: startSeconds + span.startMs / 1_000,
-      end_timestamp: startSeconds + (span.startMs + span.durationMs) / 1_000,
-      is_segment: false,
-      attributes: { ...commonAttributes, 'sentry.op': attribute(span.operation) },
+      timestamp: startSeconds + (span.startMs + span.durationMs) / 1_000,
+      status: 'ok',
     }));
-    const root = {
-      ...common('boss-spawn', rootSpanId),
-      start_timestamp: startSeconds,
-      end_timestamp: endSeconds,
-      is_segment: true,
-      attributes: {
-        ...commonAttributes,
-        'sentry.op': attribute('game.boss'),
-        'sentry.sample_rate': attribute(1, 'integer'),
-        run_id: attribute(this.attemptId),
-        bug: attribute('boss'),
-      },
-    };
-    const items = [...children, root];
 
     return envelope(
       {
+        event_id: eventId,
         sent_at: new Date().toISOString(),
         sdk: SDK,
         trace: {
@@ -224,12 +195,23 @@ export class SentryReporter {
           sample_rate: '1',
         },
       },
+      { type: 'transaction' },
       {
-        type: 'span',
-        item_count: items.length,
-        content_type: 'application/vnd.sentry.items.span.v2+json',
+        type: 'transaction',
+        event_id: eventId,
+        transaction: 'boss-spawn',
+        transaction_info: { source: 'custom' },
+        start_timestamp: startSeconds,
+        timestamp: endSeconds,
+        platform: 'javascript',
+        release: RELEASE,
+        sdk: SDK,
+        tags: { run_id: this.attemptId, bug: 'boss' },
+        contexts: {
+          trace: { trace_id: traceId, span_id: rootSpanId, op: 'game.boss', status: 'ok' },
+        },
+        spans,
       },
-      { version: 2, items },
     );
   }
 

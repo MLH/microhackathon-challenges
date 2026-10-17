@@ -49,6 +49,28 @@ function contentSecurityPolicy(runtimeConfig) {
   return `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ${connect}`;
 }
 
+/**
+ * The longest a live-evidence request may take, however Sentry's retries and timeouts add up, so
+ * the page falls back to simulated evidence promptly.
+ */
+const EVIDENCE_DEADLINE_MS = 15_000;
+
+/** Settle with `work`, or reject with a {@link SentryUnavailableError} once `milliseconds` pass. */
+async function withDeadline(work, milliseconds) {
+  let timer;
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(
+      () => reject(new SentryUnavailableError('Sentry took too long to return the report')),
+      milliseconds,
+    );
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** The ids the page gives its Sentry reports: 32 lowercase hex digits for events and traces. */
 const REPORT_ID_PATTERN = /^[0-9a-f]{32}$/;
 
@@ -276,7 +298,8 @@ async function handleSentryEvidence(request, response, options) {
   }
 
   try {
-    sendJson(response, 200, await options.fetchEvidence(bug, id));
+    const evidence = await withDeadline(options.fetchEvidence(bug, id), EVIDENCE_DEADLINE_MS);
+    sendJson(response, 200, evidence);
   } catch (error) {
     if (error instanceof SentryUnavailableError) {
       sendStatus(response, 502, error.message);

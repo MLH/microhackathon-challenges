@@ -1224,6 +1224,20 @@ test('setup notes that live mode is off when sentry.json is filled in but SENTRY
   assert.equal(standIn.requests.length, 0);
 });
 
+test('setup fails naming sentry.json when a filled-in value is malformed', async (testContext) => {
+  const standIn = await startSentryStandIn(testContext);
+  const packageDir = await makeLivePackage(standIn.url);
+  const settings = { dsn: 'http://publickey@o1.ingest.us.sentry.io/42', org: 'mlh', project: 'glitch-invaders' };
+  await writeFile(path.join(packageDir, 'sentry.json'), JSON.stringify(settings));
+  const workspace = await makeTemporaryDirectory(testContext);
+  testContext.after(() => rm(path.dirname(packageDir), { recursive: true, force: true }));
+
+  const setup = await runPackageHook(packageDir, 'setup', hookEnvironment(workspace, await freePort()));
+
+  assert.equal(setup.code, 1);
+  assert.match(setup.output, /setup: sentry\.json: invalid runtime config: sentry\.dsn must be a Sentry DSN/);
+});
+
 test('live mode fetches the weapon issue from the Sentry API with the token and returns its stack trace', async (testContext) => {
   const stack = await startLiveStack(testContext);
 
@@ -1436,4 +1450,34 @@ test('SentryReporter posts one tagged error event per bug to the DSN envelope en
   assert.deepEqual(payload.tags, { run_id: 'attempt-1', bug: 'weapon' });
   assert.equal(payload.exception.values[0].stacktrace.frames.at(-1).function, 'fireWeapon');
   assert.equal(payload.breadcrumbs[0].message, 'Firing weapon: fanout');
+});
+
+test('SentryReporter sends the boss stall as a boss-spawn transaction with one span per load', async () => {
+  const ingest = [];
+  const reporter = new SentryReporter({ dsn: LIVE_DSN }, 'attempt-1', async (_url, init) => {
+    ingest.push(init.body);
+
+    return new Response('{}');
+  });
+  const stall = {
+    totalMs: 2_200,
+    spans: [
+      { name: 'loadTextures', operation: 'game.resource.load', startMs: 0, durationMs: 1_200 },
+      { name: 'loadSounds', operation: 'game.resource.load', startMs: 1_200, durationMs: 1_000 },
+    ],
+  };
+
+  const outcome = await reporter.report({ bug: 'boss', stall });
+
+  const [, item, payload] = ingest[0].trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(item.type, 'transaction');
+  assert.equal(payload.transaction, 'boss-spawn');
+  assert.equal(payload.contexts.trace.trace_id, outcome.id);
+  assert.deepEqual(
+    payload.spans.map((span) => [span.description, span.op, Math.round((span.timestamp - span.start_timestamp) * 1_000)]),
+    [
+      ['loadTextures', 'game.resource.load', 1200],
+      ['loadSounds', 'game.resource.load', 1000],
+    ],
+  );
 });

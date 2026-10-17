@@ -4,6 +4,9 @@
  * why, so it is never left blank.
  */
 
+/** How long the page waits for the server, which gives up on Sentry sooner than this. */
+const EVIDENCE_TIMEOUT_MS = 20_000;
+
 /** The notes a fallback carries, by what went wrong. */
 export const FALLBACK_NOTES = {
   unsent: 'Sentry did not accept the report, so this is simulated evidence.',
@@ -32,6 +35,7 @@ export class LiveEvidenceProvider {
       const query = new URLSearchParams({ bug: encounter.bug, id: outcome.id });
       const response = await this.options.fetchImpl(`/api/sentry-evidence?${query}`, {
         cache: 'no-store',
+        signal: AbortSignal.timeout(EVIDENCE_TIMEOUT_MS),
       });
       if (!response.ok) {
         return this.fallback(encounter, 'unavailable');

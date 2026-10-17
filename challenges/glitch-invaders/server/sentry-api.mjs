@@ -9,10 +9,10 @@
 const REQUEST_TIMEOUT_MS = 5_000;
 
 /**
- * Waits between lookups of something Sentry has accepted but not yet indexed, about 15 seconds in
- * all; an event or trace usually appears within a few.
+ * Waits between lookups of something Sentry has accepted but not yet indexed, 10 seconds in all; an
+ * event or trace usually appears within a few. The page server's deadline caps the whole lookup.
  */
-export const INDEXING_RETRY_DELAYS_MS = [1_000, 2_000, 3_000, 4_000, 5_000];
+export const INDEXING_RETRY_DELAYS_MS = [1_000, 2_000, 3_000, 4_000];
 
 /** Sentry did not answer usefully. The message names the request, never the token. */
 export class SentryUnavailableError extends Error {

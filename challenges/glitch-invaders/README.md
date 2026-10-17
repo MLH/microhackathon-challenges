@@ -46,7 +46,9 @@ Live mode needs both halves:
 
 - **`sentry.json` filled in.** The DSN, org slug, and project slug are public
   values, so they live in the package. While any value is still a
-  `<placeholder>`, the game runs in demo mode.
+  `<placeholder>`, the game runs in demo mode. Once filled in, a malformed value
+  fails setup naming it. An optional `apiUrl` replaces the Sentry API origin,
+  `https://sentry.io`; the tests point it at a local stand-in.
 - **`SENTRY_AUTH_TOKEN` in the environment.** On a station, the event vault's
   `sentry` service sets it to a placeholder that the vault proxy swaps for the
   real token. `boothstrap dev` and a standalone run read the real token from
@@ -74,9 +76,9 @@ version:
 | Host | `sentry.io` |
 
 The token needs the `event:read`, `project:read`, and `org:read` scopes. The
-station also needs a boothstrap that gives challenges their vault credentials:
-the `next` prerelease after 2026-10-18 09:23 UTC, or any release after `0.1.0`.
-On `0.1.0` the challenge gets no token and runs in demo mode.
+station also needs a boothstrap that sets each `vault_services` credential in
+the challenge's hooks. Release `0.1.0` predates that, so on it the challenge gets
+no token and runs in demo mode.
 
 ## Run without boothstrap
 
