@@ -3,9 +3,8 @@
  * setup, or with nothing set up at all. It exits 0 in every one of those cases.
  */
 import { execFileSync } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
 import { resolveStatePaths } from './paths.mjs';
-import { clearWorkspacePath } from './workspace-file.mjs';
+import { clearWorkspacePath, readWorkspaceFile } from './workspace-file.mjs';
 
 /** How long the server gets to stop on SIGTERM before it is killed. */
 const GRACE_MS = 3_000;
@@ -43,11 +42,17 @@ function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-/** Stop the server recorded in the pid file, if it is still running. */
+/** The most a pid file holds: a pid and a newline. */
+const PID_FILE_MAX_BYTES = 32;
+
+/**
+ * Stop the server recorded in the pid file, if it is still running. A pid file that is a symlink or
+ * anything but a lone regular file is never read, so a planted one cannot point elsewhere.
+ */
 export async function stopServer(paths) {
   let pid;
   try {
-    pid = Number((await readFile(paths.pidFile, 'utf8')).trim());
+    pid = Number(((await readWorkspaceFile(paths.pidFile, PID_FILE_MAX_BYTES)) ?? '').trim());
   } catch {
     return;
   }

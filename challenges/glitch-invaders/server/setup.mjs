@@ -83,13 +83,19 @@ export async function runSetup(env, cwd) {
   }
   await ensureWorkspaceDirectory(paths.stateDir);
   await clearWorkspacePath(paths.progressFile);
+  await clearWorkspacePath(paths.pidFile);
 
   const config = { attemptId: randomUUID() };
   await writeWorkspaceFile(paths.runtimeConfigFile, `${JSON.stringify(config, null, 2)}\n`);
 
   const port = resolvePort(env);
   const serverPid = await startServer(paths, port);
-  await writeWorkspaceFile(paths.pidFile, `${serverPid}\n`);
+  try {
+    await writeWorkspaceFile(paths.pidFile, `${serverPid}\n`);
+  } catch (error) {
+    process.kill(serverPid, 'SIGKILL');
+    throw error;
+  }
 
   return {
     url: `http://127.0.0.1:${port}/`,

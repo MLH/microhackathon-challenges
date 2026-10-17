@@ -41,7 +41,6 @@ import {
 import { GameEngine } from '../challenges/glitch-invaders/game/src/engine/game-engine.mjs';
 import { createRandom } from '../challenges/glitch-invaders/game/src/engine/random.mjs';
 import { idleInput } from '../challenges/glitch-invaders/game/src/engine/world.mjs';
-import { HttpProgressStore } from '../challenges/glitch-invaders/game/src/session/progress-store.mjs';
 import { WeaponConfigError } from '../challenges/glitch-invaders/game/src/weapons/weapons.mjs';
 import { runCleanup } from '../challenges/glitch-invaders/server/cleanup.mjs';
 import { resolveStatePaths } from '../challenges/glitch-invaders/server/paths.mjs';
@@ -667,17 +666,16 @@ test('the page server sends the CSP on the page and on an error response', async
   assert.equal(missing.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
 });
 
-test('a refused progress save reports the failure instead of swallowing it', async () => {
-  const errors = [];
-  const store = new HttpProgressStore(
-    '/api/progress',
-    async () => new Response('refused', { status: 422 }),
-    (error) => errors.push(error.message),
+test('the game page shows a hidden save error that the progress store unhides on a failed save', async () => {
+  const page = await readFile(path.join(packageDirectory, 'game', 'index.html'), 'utf8');
+  const main = await readFile(path.join(packageDirectory, 'game', 'src', 'main.mjs'), 'utf8');
+
+  assert.match(
+    page,
+    /<p id="save-error"[^>]*\shidden[^>]*>Progress can't be saved; reload the page\.<\/p>/,
   );
-
-  await store.save(createProgress('attempt-1'));
-
-  assert.deepEqual(errors, ['progress save failed with status 422']);
+  assert.match(main, /new HttpProgressStore\([\s\S]*?showSaveError,?\s*\)/);
+  assert.match(main, /getElementById\('save-error'\)[\s\S]*?\.hidden = false/);
 });
 
 test('the game page has no inline styles or inline scripts for the CSP to block', async () => {
@@ -854,6 +852,35 @@ test('cleanup exits 0 and unlinks a symlinked progress file, leaving its target 
   assert.equal(cleanup.code, 0, cleanup.stderr);
   assert.equal(existsSync(progressPath), false);
   assert.equal(await readFile(outside, 'utf8'), 'outside secret');
+});
+
+test('setup unlinks a symlinked pid file, and cleanup stops the server, leaving its target untouched', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const outside = path.join(await makeTemporaryDirectory(testContext), 'outside.pid');
+  await writeFile(outside, 'outside secret');
+  await mkdir(path.join(workspace, '.glitch'));
+  await symlink(outside, path.join(workspace, '.glitch', 'server.pid'));
+  await runHook('setup', hookEnvironment(workspace, port));
+
+  const cleanup = await runHook('cleanup', hookEnvironment(workspace, port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  await waitUntilRefused(port);
+  assert.equal(await readFile(outside, 'utf8'), 'outside secret');
+});
+
+test('setup exits 0 and clears a directory planted at the progress path', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const progressPath = path.join(workspace, 'glitch-progress.json');
+  await mkdir(progressPath);
+  await writeFile(path.join(progressPath, 'inner.txt'), 'planted');
+
+  const setup = await runHook('setup', hookEnvironment(workspace, port));
+
+  assert.equal(setup.code, 0, setup.stderr);
+  assert.equal(existsSync(progressPath), false);
 });
 
 test('setup refuses a symlinked .glitch directory and leaves the outside directory untouched', async (testContext) => {
