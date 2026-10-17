@@ -2,11 +2,12 @@
  * Reads, writes, and removes a file in the participant's workspace without trusting what sits
  * there: a symlink could point anywhere, a hard link could alias a file elsewhere, a named pipe would
  * block the reader forever, and a huge file would eat memory. Only a regular file with exactly one
- * link, within a byte cap, is ever read, replaced, or removed.
+ * link, within a byte cap, is ever read, replaced, or removed, and only a real directory is written
+ * into. Clearing a path for cleanup never follows a symlink, so whatever it points at is untouched.
  */
 import { randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, rename, rm } from 'node:fs/promises';
+import { lstat, mkdir, open, rename, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 
 /** O_NOFOLLOW refuses a symlink swapped in after lstat; O_NONBLOCK keeps a swapped-in pipe from blocking open. */
@@ -20,6 +21,18 @@ export class RefusedFileError extends Error {
   constructor(message) {
     super(message);
     this.name = 'RefusedFileError';
+  }
+}
+
+/** The lstat of `target`, or `null` when nothing is there. */
+async function lstatIfPresent(target) {
+  try {
+    return await lstat(target);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
   }
 }
 
@@ -40,14 +53,9 @@ function notLoneRegularFile(file) {
  * it exists at all.
  */
 async function checkExisting(file) {
-  let stats;
-  try {
-    stats = await lstat(file);
-  } catch (error) {
-    if (error.code === 'ENOENT') {
-      return false;
-    }
-    throw error;
+  const stats = await lstatIfPresent(file);
+  if (stats === null) {
+    return false;
   }
   if (!isLoneRegularFile(stats)) {
     throw notLoneRegularFile(file);
@@ -142,4 +150,46 @@ export async function removeWorkspaceFile(file) {
   if (await checkExisting(file)) {
     await rm(file, { force: true });
   }
+}
+
+/**
+ * Create `directory` when it is absent, and accept it when it is already a real directory.
+ *
+ * @throws {RefusedFileError} when `directory` is a symlink, file, or anything else.
+ */
+export async function ensureWorkspaceDirectory(directory) {
+  const stats = await lstatIfPresent(directory);
+  if (stats === null) {
+    await mkdir(directory, { recursive: true });
+
+    return;
+  }
+  if (!stats.isDirectory()) {
+    throw new RefusedFileError(
+      `${path.basename(directory)} is not a directory (it may be a symlink)`,
+    );
+  }
+}
+
+/**
+ * Remove whatever is at `target` without following a symlink: a symlink is unlinked and its target
+ * left alone, a directory is removed with its contents, and a file, pipe, or socket is unlinked. A
+ * missing path is already cleared.
+ */
+export async function clearWorkspacePath(target) {
+  const stats = await lstatIfPresent(target);
+  if (stats === null) {
+    return;
+  }
+  if (stats.isDirectory()) {
+    await rm(target, { recursive: true, force: true });
+
+    return;
+  }
+
+  await unlink(target).catch((error) => {
+    if (error.code !== 'ENOENT') {
+      throw error;
+    }
+  });
 }

@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, request } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
@@ -812,6 +812,81 @@ test('cleanup exits 0 when the workspace does not exist', async (testContext) =>
   const cleanup = await runHook('cleanup', hookEnvironment(path.join(parent, 'missing'), port));
 
   assert.equal(cleanup.code, 0, cleanup.stderr);
+});
+
+test('cleanup exits 0 and removes a directory planted at the progress path', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const progressPath = path.join(workspace, 'glitch-progress.json');
+  await mkdir(progressPath);
+  await writeFile(path.join(progressPath, 'inner.txt'), 'planted');
+
+  const cleanup = await runHook('cleanup', hookEnvironment(workspace, port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  assert.equal(existsSync(progressPath), false);
+});
+
+test('cleanup exits 0 and unlinks a symlinked progress file, leaving its target untouched', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const outside = path.join(await makeTemporaryDirectory(testContext), 'outside.json');
+  await writeFile(outside, 'outside secret');
+  const progressPath = path.join(workspace, 'glitch-progress.json');
+  await symlink(outside, progressPath);
+
+  const cleanup = await runHook('cleanup', hookEnvironment(workspace, port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  assert.equal(existsSync(progressPath), false);
+  assert.equal(await readFile(outside, 'utf8'), 'outside secret');
+});
+
+test('setup refuses a symlinked .glitch directory and leaves the outside directory untouched', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const outside = await makeTemporaryDirectory(testContext);
+  await writeFile(path.join(outside, 'keep.txt'), 'outside secret');
+  await symlink(outside, path.join(workspace, '.glitch'));
+
+  const setup = await runHook('setup', hookEnvironment(workspace, port));
+
+  assert.notEqual(setup.code, 0);
+  assert.match(setup.stderr, /^setup: \.glitch is not a directory/);
+  assert.deepEqual(await readdir(outside), ['keep.txt']);
+  assert.equal(await readFile(path.join(outside, 'keep.txt'), 'utf8'), 'outside secret');
+  assert.equal(await isRefused(port), true);
+});
+
+test('setup refuses a symlinked runtime config and leaves its target untouched', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const outside = path.join(await makeTemporaryDirectory(testContext), 'outside.json');
+  await writeFile(outside, 'outside secret');
+  await mkdir(path.join(workspace, '.glitch'));
+  await symlink(outside, path.join(workspace, '.glitch', 'runtime-config.json'));
+
+  const setup = await runHook('setup', hookEnvironment(workspace, port));
+
+  assert.notEqual(setup.code, 0);
+  assert.match(setup.stderr, /^setup: runtime-config\.json is not a regular file with one link/);
+  assert.equal(await readFile(outside, 'utf8'), 'outside secret');
+  assert.equal(await isRefused(port), true);
+});
+
+test('cleanup after a refused setup exits 0 and unlinks the symlinked .glitch, leaving its target', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const outside = await makeTemporaryDirectory(testContext);
+  await writeFile(path.join(outside, 'keep.txt'), 'outside secret');
+  await symlink(outside, path.join(workspace, '.glitch'));
+  await runHook('setup', hookEnvironment(workspace, port));
+
+  const cleanup = await runHook('cleanup', hookEnvironment(workspace, port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  assert.equal(existsSync(path.join(workspace, '.glitch')), false);
+  assert.equal(await readFile(path.join(outside, 'keep.txt'), 'utf8'), 'outside secret');
 });
 
 test('setup and cleanup run standalone from the current directory with no BOOTHSTRAP_ variables', async (testContext) => {

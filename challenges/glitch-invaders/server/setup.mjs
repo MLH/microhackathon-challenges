@@ -6,10 +6,14 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { stopServer } from './cleanup.mjs';
 import { resolveStatePaths } from './paths.mjs';
+import {
+  clearWorkspacePath,
+  ensureWorkspaceDirectory,
+  writeWorkspaceFile,
+} from './workspace-file.mjs';
 
 /** How long setup waits for the page server to listen. */
 const READY_TIMEOUT_MS = 10_000;
@@ -77,15 +81,15 @@ export async function runSetup(env, cwd) {
   if (env.GLITCH_PORT === undefined && paths.workspace !== PACKAGE_DIR) {
     await stopServer(resolveStatePaths({}, PACKAGE_DIR));
   }
-  await mkdir(paths.stateDir, { recursive: true });
-  await rm(paths.progressFile, { force: true });
+  await ensureWorkspaceDirectory(paths.stateDir);
+  await clearWorkspacePath(paths.progressFile);
 
   const config = { attemptId: randomUUID() };
-  await writeFile(paths.runtimeConfigFile, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+  await writeWorkspaceFile(paths.runtimeConfigFile, `${JSON.stringify(config, null, 2)}\n`);
 
   const port = resolvePort(env);
   const serverPid = await startServer(paths, port);
-  await writeFile(paths.pidFile, `${serverPid}\n`, { mode: 0o600 });
+  await writeWorkspaceFile(paths.pidFile, `${serverPid}\n`);
 
   return {
     url: `http://127.0.0.1:${port}/`,

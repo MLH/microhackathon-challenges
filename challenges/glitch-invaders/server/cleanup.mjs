@@ -3,8 +3,9 @@
  * setup, or with nothing set up at all. It exits 0 in every one of those cases.
  */
 import { execFileSync } from 'node:child_process';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile } from 'node:fs/promises';
 import { resolveStatePaths } from './paths.mjs';
+import { clearWorkspacePath } from './workspace-file.mjs';
 
 /** How long the server gets to stop on SIGTERM before it is killed. */
 const GRACE_MS = 3_000;
@@ -75,8 +76,8 @@ export async function stopServer(paths) {
 /** Stop the server and remove every file the attempt created. */
 export async function runCleanup(paths) {
   await stopServer(paths);
-  await rm(paths.stateDir, { recursive: true, force: true });
-  await rm(paths.progressFile, { force: true });
+  await clearWorkspacePath(paths.stateDir);
+  await clearWorkspacePath(paths.progressFile);
 }
 
 if (import.meta.main) {
