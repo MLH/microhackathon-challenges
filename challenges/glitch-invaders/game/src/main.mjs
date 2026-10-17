@@ -24,6 +24,14 @@ function showFatal(error) {
   );
 }
 
+/** Keep the failed save visible: the state line would otherwise keep advancing past a stale file. */
+function showSaveError() {
+  const banner = document.getElementById('save-error');
+  if (banner) {
+    banner.hidden = false;
+  }
+}
+
 /** Start the game. */
 async function main() {
   const config = await loadConfig();
@@ -32,7 +40,7 @@ async function main() {
   const store = new HttpProgressStore(
     '/api/progress',
     (input, init) => fetch(input, init),
-    () => {},
+    showSaveError,
   );
 
   let saved = null;

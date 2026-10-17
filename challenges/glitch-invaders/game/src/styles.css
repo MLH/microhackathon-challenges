@@ -71,6 +71,14 @@ ul {
   border: 0;
 }
 
+.save-error {
+  padding: 6px 16px;
+  border-top: 2px solid var(--danger);
+  background: var(--surface-2);
+  color: var(--danger);
+  font-weight: 700;
+}
+
 .fatal {
   padding: 32px;
   font-size: 20px;

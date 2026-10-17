@@ -41,6 +41,7 @@ import {
 import { GameEngine } from '../challenges/glitch-invaders/game/src/engine/game-engine.mjs';
 import { createRandom } from '../challenges/glitch-invaders/game/src/engine/random.mjs';
 import { idleInput } from '../challenges/glitch-invaders/game/src/engine/world.mjs';
+import { HttpProgressStore } from '../challenges/glitch-invaders/game/src/session/progress-store.mjs';
 import { WeaponConfigError } from '../challenges/glitch-invaders/game/src/weapons/weapons.mjs';
 import { runCleanup } from '../challenges/glitch-invaders/server/cleanup.mjs';
 import { resolveStatePaths } from '../challenges/glitch-invaders/server/paths.mjs';
@@ -664,6 +665,19 @@ test('the page server sends the CSP on the page and on an error response', async
   assert.equal(page.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
   assert.equal(missing.status, 404);
   assert.equal(missing.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
+});
+
+test('a refused progress save reports the failure instead of swallowing it', async () => {
+  const errors = [];
+  const store = new HttpProgressStore(
+    '/api/progress',
+    async () => new Response('refused', { status: 422 }),
+    (error) => errors.push(error.message),
+  );
+
+  await store.save(createProgress('attempt-1'));
+
+  assert.deepEqual(errors, ['progress save failed with status 422']);
 });
 
 test('the game page has no inline styles or inline scripts for the CSP to block', async () => {
