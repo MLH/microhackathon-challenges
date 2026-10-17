@@ -1,6 +1,10 @@
-/** The page entry: read this attempt's configuration and saved progress, and start the game. */
+/**
+ * The page entry: read this attempt's configuration and saved progress, and start the game, in live
+ * Sentry mode when the config carries Sentry settings.
+ */
 import { parseRuntimeConfig } from '../../shared/runtime-config.mjs';
 import { GameApp } from './app/app.mjs';
+import { SentryReporter } from './sentry/reporter.mjs';
 import { HttpProgressStore } from './session/progress-store.mjs';
 
 /** Read `/runtime-config.json`, which the page server writes for every attempt. */
@@ -56,6 +60,13 @@ async function main() {
       store,
       reload: () => window.location.reload(),
       reducedMotion: window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+      ...(config.sentry === undefined
+        ? {}
+        : {
+            reporter: new SentryReporter(config.sentry, config.attemptId, (input, init) =>
+              fetch(input, init),
+            ),
+          }),
       ...(Number.isInteger(seed) && query.has('seed') ? { seed } : {}),
     },
     saved,

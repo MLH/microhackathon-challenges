@@ -1,7 +1,7 @@
 /**
- * Setup: prepare a clean attempt and start the page server. Deterministic and fast: it writes a
- * fresh runtime config, serves the game in the background, and exits 0 only once the server
- * answers, so Chrome never opens an unready page.
+ * Setup: prepare a clean attempt and start the page server. Deterministic and fast: it decides live
+ * or demo mode, writes a fresh runtime config, serves the game in the background, and exits 0 only
+ * once the server answers, so Chrome never opens an unready page.
  */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { stopServer } from './cleanup.mjs';
 import { resolveStatePaths } from './paths.mjs';
+import { decideMode } from './sentry-config.mjs';
 import {
   clearWorkspacePath,
   ensureWorkspaceDirectory,
@@ -31,8 +32,11 @@ function resolvePort(env) {
   return Number(new URL(manifest.browser.start_url).port);
 }
 
-/** Start the page server in the background and wait for it to listen. */
-function startServer(paths, port) {
+/**
+ * Start the page server in the background and wait for it to listen. It inherits `env`, the hook's
+ * environment, which in live mode holds the token it alone reads.
+ */
+function startServer(paths, port, env) {
   return new Promise((resolve, reject) => {
     const serveArguments = [
       path.join(PACKAGE_DIR, 'server', 'serve.mjs'),
@@ -41,6 +45,7 @@ function startServer(paths, port) {
       paths.progressFile,
     ];
     const child = spawn(process.execPath, serveArguments, {
+      env,
       stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
     });
     const timer = setTimeout(() => {
@@ -85,11 +90,15 @@ export async function runSetup(env, cwd) {
   await clearWorkspacePath(paths.progressFile);
   await clearWorkspacePath(paths.pidFile);
 
-  const config = { attemptId: randomUUID() };
+  const mode = await decideMode(env, PACKAGE_DIR);
+  const config = {
+    attemptId: randomUUID(),
+    ...(mode.sentry === null ? {} : { sentry: mode.sentry }),
+  };
   await writeWorkspaceFile(paths.runtimeConfigFile, `${JSON.stringify(config, null, 2)}\n`);
 
   const port = resolvePort(env);
-  const serverPid = await startServer(paths, port);
+  const serverPid = await startServer(paths, port, env);
   try {
     await writeWorkspaceFile(paths.pidFile, `${serverPid}\n`);
   } catch (error) {
@@ -100,6 +109,8 @@ export async function runSetup(env, cwd) {
   return {
     url: `http://127.0.0.1:${port}/`,
     attemptId: config.attemptId,
+    live: mode.sentry !== null,
+    note: mode.note,
     serverPid,
   };
 }
@@ -107,7 +118,11 @@ export async function runSetup(env, cwd) {
 if (import.meta.main) {
   runSetup(process.env, process.cwd()).then(
     (result) => {
-      process.stdout.write(`Glitch Invaders is ready at ${result.url}\n`);
+      const live = result.live ? ' (live Sentry mode)' : '';
+      process.stdout.write(`Glitch Invaders is ready at ${result.url}${live}\n`);
+      if (result.note !== null) {
+        process.stdout.write(`note: ${result.note}\n`);
+      }
       process.exit(0);
     },
     (error) => {

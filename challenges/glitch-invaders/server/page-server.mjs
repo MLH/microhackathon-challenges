@@ -1,12 +1,15 @@
 /**
  * The page server: serves the game, this attempt's runtime config, and the progress file
- * that lets a refresh or a restarted guide pick up the run. Node built-ins only, because a
+ * that lets a refresh or a restarted guide pick up the run. In live mode it also fetches Sentry's
+ * record of the page's reports, so the token never reaches the page. Node built-ins only, because a
  * Boothstrap package runs wherever it is unpacked and cannot import the repository's dependencies.
  */
 import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
-import { MAX_PROGRESS_BYTES, parseProgress } from '../shared/progress.mjs';
+import { BUG_IDS, MAX_PROGRESS_BYTES, parseProgress } from '../shared/progress.mjs';
+import { ingestOrigin } from '../shared/runtime-config.mjs';
+import { SentryUnavailableError } from './sentry-api.mjs';
 import {
   readWorkspaceFile,
   RefusedFileError,
@@ -27,16 +30,56 @@ const CONTENT_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-/**
- * Headers every response carries: nothing is cached, because a replay must never see old state, and
- * the page may load and contact nothing but this server.
- */
+/** Headers every response carries: nothing is cached, because a replay must never see old state. */
 const BASE_HEADERS = {
   'cache-control': 'no-store',
-  'content-security-policy':
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'",
   'x-content-type-options': 'nosniff',
 };
+
+/**
+ * The page may load and contact nothing but this server, and in live mode Sentry's ingest origin
+ * for the DSN, where it sends its reports.
+ */
+function contentSecurityPolicy(runtimeConfig) {
+  const connect =
+    runtimeConfig.sentry === undefined
+      ? "'self'"
+      : `'self' ${ingestOrigin(runtimeConfig.sentry.dsn)}`;
+
+  return `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ${connect}`;
+}
+
+/**
+ * The longest a live-evidence lookup may take, however Sentry's retries and timeouts add up, so
+ * the page falls back to simulated evidence promptly. Its requests and waits stop then too.
+ */
+const EVIDENCE_DEADLINE_MS = 15_000;
+
+/**
+ * Share one Sentry lookup per report among the requests asking for it at once, each lookup under
+ * {@link EVIDENCE_DEADLINE_MS}, so repeated requests cannot multiply the calls on the token.
+ */
+export function createEvidenceLookup(fetchEvidence) {
+  const inFlight = new Map();
+
+  return (bug, id) => {
+    const key = `${bug}:${id}`;
+    const running = inFlight.get(key);
+    if (running !== undefined) {
+      return running;
+    }
+
+    const lookup = fetchEvidence(bug, id, AbortSignal.timeout(EVIDENCE_DEADLINE_MS)).finally(() =>
+      inFlight.delete(key),
+    );
+    inFlight.set(key, lookup);
+
+    return lookup;
+  };
+}
+
+/** The ids the page gives its Sentry reports: 32 lowercase hex digits for events and traces. */
+const REPORT_ID_PATTERN = /^[0-9a-f]{32}$/;
 
 /** How much of a refused upload the server reads and discards before it drops the connection. */
 const MAX_DISCARDED_BYTES = 4 * MAX_PROGRESS_BYTES;
@@ -65,6 +108,16 @@ function hostIsLoopback(request) {
   const host = request.headers.host ?? '';
 
   return allowedOrigins(request).some((origin) => origin === `http://${host}`);
+}
+
+/**
+ * Whether a request came from this page by Fetch Metadata as well as by Origin, for a read that
+ * spends something: a cross-site GET from an image or a link sends no Origin.
+ */
+function isSameOrigin(request) {
+  const site = request.headers['sec-fetch-site'];
+
+  return originIsOwn(request) && (site === undefined || site === 'same-origin');
 }
 
 /** Whether a state-changing request came from this page rather than another site. */
@@ -236,6 +289,49 @@ async function handleProgress(request, response, options) {
   await saveProgress(request, response, options);
 }
 
+/**
+ * Handle `/api/sentry-evidence?bug=<bug>&id=<report id>`: 200 with live evidence, 404 in demo
+ * mode, 403 from another site, 400 for a bad query, and 502 naming the problem when Sentry cannot
+ * provide it. `lookupEvidence` is `undefined` in demo mode.
+ */
+async function handleSentryEvidence(request, response, lookupEvidence) {
+  if (lookupEvidence === undefined) {
+    sendStatus(response, 404);
+
+    return;
+  }
+  if (request.method !== 'GET') {
+    sendStatus(response, 405);
+
+    return;
+  }
+  if (!isSameOrigin(request)) {
+    sendStatus(response, 403, 'cross-site evidence requests are not allowed');
+
+    return;
+  }
+
+  const query = new URL(request.url ?? '/', 'http://localhost').searchParams;
+  const bug = query.get('bug');
+  const id = query.get('id');
+  if (!BUG_IDS.includes(bug) || id === null || !REPORT_ID_PATTERN.test(id)) {
+    sendStatus(response, 400, 'bug must be weapon, shield, or boss, and id 32 hex digits');
+
+    return;
+  }
+
+  try {
+    sendJson(response, 200, await lookupEvidence(bug, id));
+  } catch (error) {
+    if (error instanceof SentryUnavailableError) {
+      sendStatus(response, 502, error.message);
+
+      return;
+    }
+    throw error;
+  }
+}
+
 /** Serve a file from the game directory (or `/shared/`), with `/` meaning `index.html`. */
 async function handleStatic(pathname, response, gameDir) {
   let decoded;
@@ -274,9 +370,20 @@ async function handleStatic(pathname, response, gameDir) {
   }
 }
 
-/** Create the page server. The caller decides when and where it listens. */
+/**
+ * Create the page server. The caller decides when and where it listens.
+ *
+ * @param {{ gameDir: string, progressFile: string, runtimeConfig: object,
+ *   fetchEvidence?: (bug: string, id: string, signal: AbortSignal) => Promise<object> }} options
+ *   `fetchEvidence` is given only in live mode, and stops its work once `signal` aborts.
+ */
 export function createPageServer(options) {
+  const policy = contentSecurityPolicy(options.runtimeConfig);
+  const lookupEvidence =
+    options.fetchEvidence === undefined ? undefined : createEvidenceLookup(options.fetchEvidence);
+
   return createServer((request, response) => {
+    response.setHeader('content-security-policy', policy);
     void (async () => {
       if (!hostIsLoopback(request)) {
         sendStatus(response, 403, 'this server answers to loopback names only');
@@ -293,6 +400,8 @@ export function createPageServer(options) {
         sendJson(response, 200, options.runtimeConfig);
       } else if (pathname === '/api/progress') {
         await handleProgress(request, response, options);
+      } else if (pathname === '/api/sentry-evidence') {
+        await handleSentryEvidence(request, response, lookupEvidence);
       } else if (request.method === 'GET' || request.method === 'HEAD') {
         await handleStatic(pathname, response, options.gameDir);
       } else {
