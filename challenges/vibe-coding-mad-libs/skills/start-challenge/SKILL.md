@@ -35,9 +35,7 @@ participant which step they finished instead, without mentioning points.
    you start building. A bracketed blank or a request to skip doesn't count.
 2. **build-app.** Write the app to `index.html`, then read it back to check
    it is whole. As soon as it is, call `show_preview` with
-   `http://127.0.0.1:4321/` without asking first. This challenge overrides the
-   station's ask-first rule for `show_preview`, because seeing the app is the
-   challenge.
+   `http://127.0.0.1:4321/` without asking first.
    When `show_preview` is missing or fails, give them that URL to open.
    Nothing watches the page, so ask them to try it and tell you how it went.
    Report `build-app` only after they say it works; if it doesn't, fix it and
