@@ -1,15 +1,15 @@
 // Proves the glitch-invaders package: the three intentional failures trigger
 // through gameplay and verify their repairs in play; stack frames match the
-// real source lines; the IncidentTracker enforces stage progression; the
-// zero-dependency SentryReporter builds valid event and span v2 envelopes; the
-// page server serves native .mjs modules, enforces origin/host/size checks on
-// progress writes, and starts and stops cleanly through setup and cleanup.
+// real source lines; the IncidentTracker enforces stage progression; the page
+// server serves native .mjs modules under a strict CSP, enforces origin, host,
+// size, and path checks, and refuses a planted progress file; and the setup and
+// cleanup hooks start and stop the server cleanly, including after failures.
 
 import assert from 'node:assert/strict';
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { request } from 'node:http';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { createServer as createHttpServer, request } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -29,9 +29,7 @@ import {
   IllegalBugTransitionError,
   IncidentTracker,
 } from '../challenges/glitch-invaders/game/src/bugs/incident-tracker.mjs';
-import { BreadcrumbRecorder } from '../challenges/glitch-invaders/game/src/diagnostics/breadcrumbs.mjs';
 import { WEAPON_STACK_FRAMES } from '../challenges/glitch-invaders/game/src/diagnostics/evidence-builders.mjs';
-import { LiveEvidenceProvider } from '../challenges/glitch-invaders/game/src/diagnostics/live-evidence.mjs';
 import { SimulatedEvidenceProvider } from '../challenges/glitch-invaders/game/src/diagnostics/simulated-evidence.mjs';
 import {
   BOSS_SPAWN_BUDGET_MS,
@@ -43,7 +41,6 @@ import {
 import { GameEngine } from '../challenges/glitch-invaders/game/src/engine/game-engine.mjs';
 import { createRandom } from '../challenges/glitch-invaders/game/src/engine/random.mjs';
 import { idleInput } from '../challenges/glitch-invaders/game/src/engine/world.mjs';
-import { parseDsn, SentryReporter } from '../challenges/glitch-invaders/game/src/sentry/sentry-reporter.mjs';
 import { WeaponConfigError } from '../challenges/glitch-invaders/game/src/weapons/weapons.mjs';
 import { runCleanup } from '../challenges/glitch-invaders/server/cleanup.mjs';
 import { resolveStatePaths } from '../challenges/glitch-invaders/server/paths.mjs';
@@ -54,6 +51,9 @@ const runFile = promisify(execFile);
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const packageDirectory = path.join(testDirectory, '..', 'challenges', 'glitch-invaders');
 const FRAME_MS = 16;
+const SERVER_EXIT_TIMEOUT_MS = 5_000;
+const CONTENT_SECURITY_POLICY =
+  "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'";
 
 /** Fake time for the boss loader, which needs `now` and `sleep`. */
 class VirtualClock {
@@ -143,7 +143,7 @@ function createHarness(code = createBrokenCodeState(), seed = 7) {
 
 /** A code state where `bugs` have been repaired with their correct patches. */
 function repaired(...bugs) {
-  const progress = createProgress('test-attempt', 'demo');
+  const progress = createProgress('test-attempt');
   for (const bug of bugs) {
     progress.bugs[bug].stage = 'repaired';
   }
@@ -164,12 +164,102 @@ function freePort() {
   });
 }
 
-/** The environment of a station that provides no live Sentry settings. */
-function demoEnvironment() {
-  return {
-    PATH: process.env.PATH,
-    GLITCH_LIVE_CONFIG: path.join(os.tmpdir(), 'glitch-test-no-live-config.json'),
-  };
+/** Make a fresh temporary directory that `testContext` removes when the test ends. */
+async function makeTemporaryDirectory(testContext) {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'glitch-test-'));
+  testContext.after(() => rm(directory, { recursive: true, force: true }));
+
+  return directory;
+}
+
+/** The environment a hook sees for `workspace` on `port`, with nothing else from this process. */
+function hookEnvironment(workspace, port) {
+  return { PATH: process.env.PATH, BOOTHSTRAP_WORKSPACE: workspace, GLITCH_PORT: String(port) };
+}
+
+/** Run the package's `hook` (setup or cleanup) to completion and resolve with its exit code, output, and pid. */
+function runHook(hook, env, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(path.join(packageDirectory, hook), [], {
+      ...options,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, stdout, stderr, pid: child.pid }));
+  });
+}
+
+/** Make a workspace whose cleanup hook runs in teardown, so no server outlives the test. */
+async function makeWorkspace(testContext, port) {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'glitch-hooks-'));
+  testContext.after(async () => {
+    await runHook('cleanup', hookEnvironment(workspace, port));
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  return workspace;
+}
+
+/** Start a server on `port` that answers every request with `body`, closed when the test ends. */
+function holdPort(testContext, port, body) {
+  return new Promise((resolve, reject) => {
+    const server = createHttpServer((_request, response) => response.end(body));
+    testContext.after(
+      () =>
+        new Promise((done) => {
+          server.close(done);
+          server.closeAllConnections();
+        }),
+    );
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve(server));
+  });
+}
+
+/** The text `/` answers with on `port`. */
+async function pageText(port) {
+  return (await fetch(`http://127.0.0.1:${port}/`)).text();
+}
+
+/** Whether connecting to `port` is refused. */
+async function isRefused(port) {
+  try {
+    await fetch(`http://127.0.0.1:${port}/`);
+  } catch (error) {
+    return error.cause?.code === 'ECONNREFUSED';
+  }
+
+  return false;
+}
+
+/** Poll until connecting to `port` is refused, failing the test if it never is. */
+async function waitUntilRefused(port) {
+  const deadline = Date.now() + SERVER_EXIT_TIMEOUT_MS;
+  while (!(await isRefused(port))) {
+    assert.ok(Date.now() < deadline, `port ${port} still accepts connections`);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}
+
+/** The page server's pid, from the pid file setup wrote in `workspace`. */
+async function readServerPid(workspace) {
+  return Number((await readFile(path.join(workspace, '.glitch', 'server.pid'), 'utf8')).trim());
+}
+
+/** Read one column of `ps` for `pid`, such as `pgid`. */
+async function readProcessColumn(column, pid) {
+  const { stdout } = await runFile('ps', ['-o', `${column}=`, '-p', String(pid)]);
+
+  return stdout.trim();
 }
 
 /** Run setup for a new attempt in a fresh temporary workspace and register cleanup on `testContext`. */
@@ -177,7 +267,7 @@ async function startStack(testContext, extraEnv = {}) {
   const workspace = await mkdtemp(path.join(os.tmpdir(), 'glitch-ws-'));
   const port = await freePort();
   const env = {
-    ...demoEnvironment(),
+    PATH: process.env.PATH,
     BOOTHSTRAP_WORKSPACE: workspace,
     BOOTHSTRAP_STATION_ID: 'test-station',
     BOOTHSTRAP_SESSION_ID: 'test-session',
@@ -215,15 +305,37 @@ async function answers(port) {
   }
 }
 
-/** The status of `/healthz` when the request claims to be for `host`. */
-function statusWithHost(url, host) {
+/**
+ * GET `requestPath` from the server at `url` exactly as written, since `fetch` would normalize dot
+ * segments away; `headers` may replace the Host. Resolves with the status, headers, and text.
+ */
+function getRaw(url, requestPath, headers = {}) {
   return new Promise((resolve, reject) => {
-    const probe = request(`${url}healthz`, { headers: { host } }, (response) => {
-      response.resume();
-      resolve(response.statusCode ?? 0);
-    });
+    const { hostname, port, host } = new URL(url);
+    const probe = request(
+      { hostname, port, path: requestPath, headers: { host, ...headers } },
+      (response) => {
+        let text = '';
+        response.setEncoding('utf8');
+        response.on('data', (chunk) => {
+          text += chunk;
+        });
+        response.on('end', () =>
+          resolve({ status: response.statusCode ?? 0, headers: response.headers, text }),
+        );
+      },
+    );
     probe.once('error', reject);
     probe.end();
+  });
+}
+
+/** PUT `body` as JSON to the progress endpoint of the server at `url`; `headers` add or replace. */
+function putProgressTo(url, body, headers = {}) {
+  return fetch(`${url}api/progress`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...headers },
+    body,
   });
 }
 
@@ -419,7 +531,7 @@ test('continues into a tougher boss showdown after completion and finishes when 
 });
 
 test('IncidentTracker enforces stage order, numbers milestones once, and formats the state marker', () => {
-  const tracker = new IncidentTracker(createProgress('test-attempt', 'demo'));
+  const tracker = new IncidentTracker(createProgress('test-attempt'));
   const correctDiagnosis = {
     weapon: 'missing-config',
     shield: 'amplified',
@@ -448,7 +560,7 @@ test('IncidentTracker enforces stage order, numbers milestones once, and formats
   );
 });
 
-test('SimulatedEvidenceProvider and LiveEvidenceProvider build structured evidence and links', async () => {
+test('SimulatedEvidenceProvider builds labelled evidence with a stack trace for the weapon jam', async () => {
   const weaponEncounter = {
     bug: 'weapon',
     jam: {
@@ -457,102 +569,18 @@ test('SimulatedEvidenceProvider and LiveEvidenceProvider build structured eviden
       error: new Error('Configuration missing for weapon: fanout'),
     },
   };
+
   const simulated = await new SimulatedEvidenceProvider().evidenceFor(weaponEncounter);
+
   assert.equal(simulated.source, 'simulated');
-  assert.equal(simulated.link, null);
+  assert.equal(simulated.bug, 'weapon');
   assert.ok(simulated.sections.some((section) => section.kind === 'stacktrace'));
-
-  const live = new LiveEvidenceProvider({
-    reporter: {
-      add: () => undefined,
-      traceBossSpawn: async (work) => ({
-        result: await work((_name, _op, load) => load()),
-        traceId: null,
-      }),
-      report: async () => ({ referenceId: 'evt1', delivery: 'confirmed' }),
-    },
-    settings: {
-      dsn: 'https://key@o1.ingest.sentry.io/1',
-      org: 'acme',
-      project: 'booth',
-      environment: 'booth',
-    },
-    attemptId: 'attempt-1',
-    recorder: new BreadcrumbRecorder(() => 0),
-    clock: () => 0,
-  });
-  const liveEvidence = await live.evidenceFor(weaponEncounter);
-  assert.equal(liveEvidence.source, 'live');
-  assert.ok(liveEvidence.link?.url.includes('https://acme.sentry.io/issues/'));
-});
-
-test('SentryReporter prewarms the boss-spawn v2 span envelope and sends one event envelope per bug', async () => {
-  const requests = [];
-  const fakeFetch = async (url, options) => {
-    requests.push({ url, body: options.body });
-
-    return { ok: true };
-  };
-  const settings = {
-    dsn: 'https://publickey@o42.ingest.us.sentry.io/99',
-    org: 'acme',
-    project: 'booth',
-    environment: 'booth',
-  };
-  const parsed = parseDsn(settings.dsn);
-  assert.equal(parsed.publicKey, 'publickey');
-  assert.equal(parsed.projectId, '99');
-  assert.equal(parsed.orgId, '42');
-
-  const reporter = new SentryReporter(
-    settings,
-    {
-      attemptId: 'attempt-1',
-      stationId: 'station-1',
-      sessionId: null,
-      release: 'glitch-invaders@1.0.0',
-    },
-    fakeFetch,
-  );
-
-  assert.equal(requests.length, 1);
-  const [, spanHeaderLine, spanPayloadLine] = requests[0].body.trim().split('\n');
-  assert.equal(JSON.parse(spanHeaderLine).type, 'span');
-  assert.equal(JSON.parse(spanPayloadLine).items.length, 5);
-
-  const traced = await reporter.traceBossSpawn(async () => 'done');
-  assert.match(traced.traceId, /^[0-9a-f]{32}$/);
-  assert.equal(traced.result, 'done');
-
-  reporter.add({ category: 'game.shield', message: 'Shield enabled', data: { shieldActive: 'true' } });
-  const jam = {
-    bug: 'weapon',
-    jam: {
-      weaponId: 'fanout',
-      availableWeapons: ['single'],
-      error: new Error('Configuration missing for weapon: fanout'),
-    },
-  };
-  const first = await reporter.report(jam);
-  const second = await reporter.report(jam);
-
-  assert.equal(requests.length, 2);
-  assert.deepEqual(second, first);
-  assert.equal(first.delivery, 'confirmed');
-  const [, eventHeaderLine, eventPayloadLine] = requests[1].body.trim().split('\n');
-  assert.equal(JSON.parse(eventHeaderLine).type, 'event');
-  assert.equal(JSON.parse(eventPayloadLine).exception.values[0].type, 'WeaponConfigError');
 });
 
 test('the page server serves native .mjs modules, stores progress, and refuses cross-origin or invalid writes', async (testContext) => {
   const stack = await startStack(testContext);
   const base = stack.url.replace(/\/$/, '');
-  const putProgress = (body, headers = {}) =>
-    fetch(`${base}/api/progress`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', ...headers },
-      body,
-    });
+  const putProgress = (body, headers = {}) => putProgressTo(stack.url, body, headers);
 
   assert.equal((await fetch(`${base}/healthz`)).status, 200);
 
@@ -569,11 +597,9 @@ test('the page server serves native .mjs modules, stores progress, and refuses c
   assert.match(sharedResponse.headers.get('content-type') ?? '', /text\/javascript/);
 
   const config = await (await fetch(`${base}/runtime-config.json`)).json();
-  assert.equal(config.mode, 'demo');
-  assert.equal(config.sentry, null);
-  assert.equal(config.attemptId, stack.attemptId);
+  assert.deepEqual(config, { attemptId: stack.attemptId });
 
-  const progress = createProgress(stack.attemptId, 'demo');
+  const progress = createProgress(stack.attemptId);
   progress.launched = true;
   assert.equal((await putProgress(JSON.stringify(progress))).status, 204);
 
@@ -581,7 +607,7 @@ test('the page server serves native .mjs modules, stores progress, and refuses c
   assert.equal(stored.launched, true);
   assert.equal(JSON.parse(await readFile(stack.paths.progressFile, 'utf8')).launched, true);
 
-  const other = createProgress('another-attempt', 'demo');
+  const other = createProgress('another-attempt');
   assert.equal((await putProgress(JSON.stringify(other))).status, 409);
   assert.equal((await putProgress('{"version":1}')).status, 400);
   assert.equal((await putProgress('not json')).status, 400);
@@ -591,7 +617,7 @@ test('the page server serves native .mjs modules, stores progress, and refuses c
     (await putProgress(JSON.stringify(progress), { origin: 'https://evil.example' })).status,
     403,
   );
-  assert.equal(await statusWithHost(stack.url, 'evil.example'), 403);
+  assert.equal((await getRaw(stack.url, '/healthz', { host: 'evil.example' })).status, 403);
   assert.equal((await fetch(`${base}/..%2F..%2Fchallenge.json`)).status, 404);
 
   assert.equal((await fetch(`${base}/api/progress`, { method: 'DELETE' })).status, 204);
@@ -602,7 +628,7 @@ test('the shipped setup and cleanup hooks start and stop the server and clean up
   const workspace = await mkdtemp(path.join(os.tmpdir(), 'glitch-hooks-'));
   const port = await freePort();
   const env = {
-    ...demoEnvironment(),
+    PATH: process.env.PATH,
     BOOTHSTRAP_WORKSPACE: workspace,
     BOOTHSTRAP_PACKAGE_DIR: packageDirectory,
     GLITCH_PORT: String(port),
@@ -625,5 +651,184 @@ test('the shipped setup and cleanup hooks start and stop the server and clean up
 
   assert.equal(alive(pid), false);
   assert.equal(await answers(port), false);
+  assert.equal(existsSync(path.join(workspace, '.glitch')), false);
+});
+
+test('the page server sends the CSP on the page and on an error response', async (testContext) => {
+  const stack = await startStack(testContext);
+
+  const page = await getRaw(stack.url, '/');
+  const missing = await getRaw(stack.url, '/no-such-file.mjs');
+
+  assert.equal(page.status, 200);
+  assert.equal(page.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
+  assert.equal(missing.status, 404);
+  assert.equal(missing.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
+});
+
+test('the game page has no inline styles or inline scripts for the CSP to block', async () => {
+  const page = await readFile(path.join(packageDirectory, 'game', 'index.html'), 'utf8');
+
+  assert.doesNotMatch(page, /<style|style=/);
+  assert.doesNotMatch(page, /<script(?![^>]*\ssrc=)[^>]*>/);
+  assert.doesNotMatch(page, /\son[a-z]+=/);
+});
+
+for (const requestPath of [
+  '/%2e%2e/challenge.json',
+  '/%2e%2e/server/setup.mjs',
+  '/shared/%2e%2e/server/setup.mjs',
+  '/shared/..%2F..%2Fchallenge.json',
+]) {
+  test(`the page server refuses the traversal ${requestPath} with 404`, async (testContext) => {
+    const stack = await startStack(testContext);
+
+    const response = await getRaw(stack.url, requestPath);
+
+    assert.equal(response.status, 404);
+  });
+}
+
+test('the page server answers 400 for a path with a malformed percent-escape', async (testContext) => {
+  const stack = await startStack(testContext);
+
+  const response = await getRaw(stack.url, '/%E0%A4%A');
+
+  assert.equal(response.status, 400);
+  assert.equal(response.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
+});
+
+test('the page server answers 400 for a progress PUT that is not JSON and stores nothing', async (testContext) => {
+  const stack = await startStack(testContext);
+
+  const response = await putProgressTo(stack.url, '{"launched": tru');
+
+  assert.equal(response.status, 400);
+  assert.equal(existsSync(stack.paths.progressFile), false);
+});
+
+test('the page server answers 413 for a streamed progress body over the cap and stores nothing', async (testContext) => {
+  const stack = await startStack(testContext);
+  const chunk = new TextEncoder().encode(' '.repeat(4_096));
+  const oversizedStream = new ReadableStream({
+    start(controller) {
+      for (let sent = 0; sent < 5; sent += 1) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
+
+  const response = await fetch(`${stack.url}api/progress`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: oversizedStream,
+    duplex: 'half',
+  });
+
+  assert.equal(response.status, 413);
+  assert.equal(existsSync(stack.paths.progressFile), false);
+});
+
+test('the page server refuses a symlinked progress file with 422 and leaves its target untouched', async (testContext) => {
+  const stack = await startStack(testContext);
+  const outside = path.join(await makeTemporaryDirectory(testContext), 'outside.json');
+  await writeFile(outside, 'outside secret');
+  await symlink(outside, stack.paths.progressFile);
+  const progress = createProgress(stack.attemptId);
+
+  const read = await getRaw(stack.url, '/api/progress');
+  const write = await putProgressTo(stack.url, JSON.stringify(progress));
+
+  assert.equal(read.status, 422);
+  assert.doesNotMatch(read.text, /outside secret/);
+  assert.equal(write.status, 422);
+  assert.equal(await readFile(outside, 'utf8'), 'outside secret');
+});
+
+test("setup keeps the page server in setup's own process group", async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+
+  const setup = await runHook('setup', hookEnvironment(workspace, port), { detached: true });
+  testContext.after(() => {
+    try {
+      process.kill(-setup.pid, 'SIGKILL');
+    } catch {
+      // The group is already gone.
+    }
+  });
+
+  assert.equal(setup.code, 0, setup.stderr);
+  assert.equal(await readProcessColumn('pgid', await readServerPid(workspace)), String(setup.pid));
+});
+
+test('setup fails naming the port when it is busy, and leaves the other listener and no pid file', async (testContext) => {
+  const port = await freePort();
+  await holdPort(testContext, port, 'foreign listener');
+  const workspace = await makeWorkspace(testContext, port);
+
+  const setup = await runHook('setup', hookEnvironment(workspace, port));
+
+  assert.notEqual(setup.code, 0);
+  assert.match(setup.stderr, new RegExp(`127\\.0\\.0\\.1:${port}`));
+  assert.equal(await pageText(port), 'foreign listener');
+  assert.equal(existsSync(path.join(workspace, '.glitch', 'server.pid')), false);
+});
+
+test('cleanup after a failed setup exits 0 and leaves the other listener answering', async (testContext) => {
+  const port = await freePort();
+  await holdPort(testContext, port, 'foreign listener');
+  const workspace = await makeWorkspace(testContext, port);
+  await runHook('setup', hookEnvironment(workspace, port));
+
+  const cleanup = await runHook('cleanup', hookEnvironment(workspace, port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  assert.equal(await pageText(port), 'foreign listener');
+  assert.equal(existsSync(path.join(workspace, '.glitch')), false);
+});
+
+test('cleanup after a crash exits 0 and leaves the other listener on the port answering', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const setup = await runHook('setup', hookEnvironment(workspace, port));
+  assert.equal(setup.code, 0, setup.stderr);
+  process.kill(await readServerPid(workspace), 'SIGKILL');
+  await waitUntilRefused(port);
+  await holdPort(testContext, port, 'foreign listener');
+
+  const cleanup = await runHook('cleanup', hookEnvironment(workspace, port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  assert.equal(await pageText(port), 'foreign listener');
+  assert.equal(existsSync(path.join(workspace, '.glitch')), false);
+});
+
+test('cleanup exits 0 when the workspace does not exist', async (testContext) => {
+  const port = await freePort();
+  const parent = await makeTemporaryDirectory(testContext);
+
+  const cleanup = await runHook('cleanup', hookEnvironment(path.join(parent, 'missing'), port));
+
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+});
+
+test('setup and cleanup run standalone from the current directory with no BOOTHSTRAP_ variables', async (testContext) => {
+  const port = await freePort();
+  const workspace = await makeWorkspace(testContext, port);
+  const env = { PATH: process.env.PATH, GLITCH_PORT: String(port) };
+
+  const setup = await runHook('setup', env, { cwd: workspace });
+  const served = await getRaw(`http://127.0.0.1:${port}/`, '/');
+  const pid = await readServerPid(workspace);
+  const cleanup = await runHook('cleanup', env, { cwd: workspace });
+
+  assert.equal(setup.code, 0, setup.stderr);
+  assert.match(setup.stdout, new RegExp(`http://127\\.0\\.0\\.1:${port}/`));
+  assert.equal(served.status, 200);
+  assert.equal(cleanup.code, 0, cleanup.stderr);
+  assert.equal(alive(pid), false);
+  assert.equal(await isRefused(port), true);
   assert.equal(existsSync(path.join(workspace, '.glitch')), false);
 });
