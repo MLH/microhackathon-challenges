@@ -41,7 +41,7 @@ function liveEvidenceFetcher(runtimeConfig, env) {
 
   const api = new SentryApi({ ...runtimeConfig.sentry, token });
 
-  return (bug, id) => fetchLiveEvidence(api, bug, id);
+  return (bug, id, signal) => fetchLiveEvidence(api, bug, id, signal);
 }
 
 /** Start serving. */

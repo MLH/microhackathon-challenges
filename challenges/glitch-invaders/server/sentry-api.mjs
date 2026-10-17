@@ -4,13 +4,14 @@
  * result ever carries it. On a station the request leaves through the vault proxy, which swaps the
  * placeholder token for the real one.
  */
+import { LOAD_SPAN_OP } from '../game/src/boss/boss-loader.mjs';
 
 /** How long one API request may take before it counts as an outage. */
 const REQUEST_TIMEOUT_MS = 5_000;
 
 /**
  * Waits between lookups of something Sentry has accepted but not yet indexed, 10 seconds in all; an
- * event or trace usually appears within a few. The page server's deadline caps the whole lookup.
+ * event or trace usually appears within a few. The caller's deadline signal caps the whole lookup.
  */
 export const INDEXING_RETRY_DELAYS_MS = [1_000, 2_000, 3_000, 4_000];
 
@@ -22,9 +23,24 @@ export class SentryUnavailableError extends Error {
   }
 }
 
-/** Pause for `milliseconds`. */
-function sleep(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+/** Pause for `milliseconds`, or reject as soon as `signal` aborts. */
+function sleep(milliseconds, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, milliseconds);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(timer);
+        reject(signal.reason);
+      },
+      { once: true },
+    );
+  });
+}
+
+/** The failure a lookup ends with once its deadline passes. */
+function pastDeadline() {
+  return new SentryUnavailableError('Sentry took too long to return the report');
 }
 
 /** Reads one Sentry organization and project with a bearer token. */
@@ -32,8 +48,11 @@ export class SentryApi {
   #token;
 
   /**
-   * @param {{ apiUrl: string, org: string, project: string, token: string, sleep?: Function,
+   * @param {{ apiUrl: string, org: string, project: string, token: string,
+   *   sleep?: (milliseconds: number, signal: AbortSignal) => Promise<void>,
    *   retryDelaysMs?: number[] }} options `sleep` and `retryDelaysMs` let tests skip the waits.
+   *   Every lookup takes a `signal`, its deadline: once it aborts, the lookup stops its request or
+   *   wait and fails as a {@link SentryUnavailableError}.
    */
   constructor(options) {
     this.apiUrl = options.apiUrl;
@@ -45,18 +64,20 @@ export class SentryApi {
   }
 
   /** One error event, by the id the page gave it; waits while Sentry is still indexing it. */
-  event(eventId) {
+  event(eventId, signal) {
     const org = encodeURIComponent(this.org);
     const project = encodeURIComponent(this.project);
+    const resource = `/api/0/projects/${org}/${project}/events/${eventId}/`;
 
-    return this.untilIndexed(() => this.get(`/api/0/projects/${org}/${project}/events/${eventId}/`));
+    return this.untilIndexed(() => this.get(resource, signal), signal);
   }
 
   /** The issue an event was grouped into. */
-  async issue(groupId) {
+  async issue(groupId, signal) {
     const org = encodeURIComponent(this.org);
     const issue = await this.get(
       `/api/0/organizations/${org}/issues/${encodeURIComponent(groupId)}/`,
+      signal,
     );
     if (issue === null) {
       throw new SentryUnavailableError(`Sentry has no issue ${groupId}`);
@@ -66,10 +87,10 @@ export class SentryApi {
   }
 
   /** The boss-load spans of trace `traceId`, oldest first; waits while Sentry is indexing them. */
-  traceSpans(traceId) {
+  traceSpans(traceId, signal) {
     const query = new URLSearchParams({
       dataset: 'spans',
-      query: `trace:${traceId} span.op:game.resource.load`,
+      query: `trace:${traceId} span.op:${LOAD_SPAN_OP}`,
       sort: 'precise.start_ts',
       statsPeriod: '24h',
       per_page: '20',
@@ -80,18 +101,18 @@ export class SentryApi {
     const resource = `/api/0/organizations/${encodeURIComponent(this.org)}/events/?${query}`;
 
     return this.untilIndexed(async () => {
-      const result = await this.get(resource);
+      const result = await this.get(resource, signal);
       const rows = Array.isArray(result?.data) ? result.data : [];
 
       return rows.length === 0 ? null : rows;
-    });
+    }, signal);
   }
 
   /**
    * Run `lookup` until it finds something, waiting {@link INDEXING_RETRY_DELAYS_MS} between tries.
-   * An outage fails at once; only "not there yet" is retried.
+   * An outage fails at once; only "not there yet" is retried, and only until `signal` aborts.
    */
-  async untilIndexed(lookup) {
+  async untilIndexed(lookup, signal) {
     for (const delayMs of [...this.retryDelaysMs, null]) {
       const found = await lookup();
       if (found !== null) {
@@ -100,7 +121,14 @@ export class SentryApi {
       if (delayMs === null) {
         break;
       }
-      await this.sleep(delayMs);
+      try {
+        await this.sleep(delayMs, signal);
+      } catch {
+        throw pastDeadline();
+      }
+      if (signal.aborted) {
+        throw pastDeadline();
+      }
     }
 
     throw new SentryUnavailableError('Sentry has not indexed the report yet');
@@ -110,17 +138,24 @@ export class SentryApi {
    * GET `resource` from the API as JSON.
    *
    * @returns {Promise<unknown | null>} the body, or `null` for a 404.
-   * @throws {SentryUnavailableError} for a network failure, a timeout, or any other non-200 status.
+   * @throws {SentryUnavailableError} for a network failure, a timeout, a passed deadline, or any
+   *   other non-200 status.
    */
-  async get(resource) {
+  async get(resource, signal) {
+    if (signal.aborted) {
+      throw pastDeadline();
+    }
     const pathname = resource.split('?')[0];
     let response;
     try {
       response = await fetch(`${this.apiUrl}${resource}`, {
         headers: { authorization: `Bearer ${this.#token}`, accept: 'application/json' },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.any([signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]),
       });
     } catch {
+      if (signal.aborted) {
+        throw pastDeadline();
+      }
       throw new SentryUnavailableError(`Sentry did not answer ${pathname}`);
     }
     if (response.status === 404) {

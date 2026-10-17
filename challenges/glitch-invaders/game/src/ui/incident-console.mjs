@@ -438,15 +438,20 @@ export class IncidentConsole {
   }
 }
 
-/** Render context tags as scannable pill badges. */
+/** Render context tags as scannable pill badges, under the section's caption when it has one. */
 function renderContextPills(section) {
-  return h(
+  const pills = h(
     'dl',
     { class: 'context-pills', 'aria-label': section.title },
     ...Object.entries(section.entries).map(([key, value]) =>
       h('div', { class: 'context-pill' }, h('dt', {}, `${key}:`), h('dd', {}, value)),
     ),
   );
+  if (section.caption === undefined) {
+    return pills;
+  }
+
+  return h('div', {}, h('p', { class: 'muted context-caption' }, section.caption), pills);
 }
 
 /** Render the primary diagnostic section on screen. */

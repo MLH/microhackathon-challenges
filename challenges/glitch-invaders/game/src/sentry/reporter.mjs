@@ -4,7 +4,7 @@
  * the bug. It needs only the public DSN, so no token is ever on the page; the page server reads
  * back what Sentry recorded. No SDK is loaded: the page's CSP allows scripts from itself alone.
  */
-import { WEAPON_STACK_FRAMES } from '../diagnostics/evidence-builders.mjs';
+import { SHIELD_STACK_FRAMES, WEAPON_STACK_FRAMES } from '../diagnostics/evidence-builders.mjs';
 
 /** How long to wait for Sentry to accept a report. */
 export const DELIVERY_TIMEOUT_MS = 2_500;
@@ -44,6 +44,16 @@ export function parseDsn(dsn) {
 /** One envelope: a header line, then an item header and payload line per item. */
 function envelope(header, itemHeader, payload) {
   return `${JSON.stringify(header)}\n${JSON.stringify(itemHeader)}\n${JSON.stringify(payload)}\n`;
+}
+
+/** Curated frames, innermost first, as Sentry's oldest-first stacktrace frames. */
+function toSentryFrames(frames) {
+  return frames.toReversed().map((frame) => ({
+    filename: frame.file,
+    function: frame.functionName,
+    lineno: frame.line,
+    in_app: frame.inApp,
+  }));
 }
 
 /** Sends the game's intentional failures to Sentry, once per bug. */
@@ -105,24 +115,12 @@ export class SentryReporter {
       ? {
           type: 'WeaponConfigError',
           value: encounter.jam.error.message,
-          frames: [...WEAPON_STACK_FRAMES].reverse().map((frame) => ({
-            filename: frame.file,
-            function: frame.functionName,
-            lineno: frame.line,
-            in_app: frame.inApp,
-          })),
+          frames: toSentryFrames(WEAPON_STACK_FRAMES),
         }
       : {
           type: 'GameLogicError',
           value: `Shield was active but ${encounter.failure.actualDamage} damage was applied (expected 0). Ship destroyed despite an active shield.`,
-          frames: [
-            {
-              filename: 'game/src/shield/shield.mjs',
-              function: 'resolveShieldHit',
-              lineno: 14,
-              in_app: true,
-            },
-          ],
+          frames: toSentryFrames(SHIELD_STACK_FRAMES),
         };
     const contexts = isWeapon
       ? {

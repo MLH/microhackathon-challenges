@@ -158,7 +158,7 @@ export class GameApp {
   showOpening() {
     if (!this.progress.launched) {
       this.overlays.show(
-        introCard({ returning: false, onStart: () => this.startRun() }),
+        introCard({ live: this.live !== null, returning: false, onStart: () => this.startRun() }),
       );
 
       return;
@@ -193,7 +193,7 @@ export class GameApp {
       this.openRestoredIncident(bug);
     };
     this.overlays.show(
-      introCard({ returning: true, onStart: () => this.resumeRun() }),
+      introCard({ live: this.live !== null, returning: true, onStart: () => this.resumeRun() }),
     );
   }
 

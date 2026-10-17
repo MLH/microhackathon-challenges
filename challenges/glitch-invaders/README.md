@@ -48,20 +48,30 @@ Live mode needs both halves:
   values, so they live in the package. While any value is still a
   `<placeholder>`, the game runs in demo mode. Once filled in, a malformed value
   fails setup naming it. An optional `apiUrl` replaces the Sentry API origin,
-  `https://sentry.io`; the tests point it at a local stand-in.
+  `https://sentry.io`, with a subdomain of it or, for the tests' local
+  stand-in, a loopback address; the token goes to no other host.
 - **`SENTRY_AUTH_TOKEN` in the environment.** On a station, the event vault's
   `sentry` service sets it to a placeholder that the vault proxy swaps for the
   real token. `boothstrap dev` and a standalone run read the real token from
   your shell.
 
+`boothstrap dev` refuses to play the package unless `SENTRY_AUTH_TOKEN` or
+`SENTRY_API_KEY` is set, because `vault_services` names `sentry`. Any value
+keeps demo mode while `sentry.json` holds placeholders, and `SENTRY_API_KEY`
+satisfies dev but leaves the game in demo mode, since the package reads only
+`SENTRY_AUTH_TOKEN`.
+
 In live mode the page reports each failure to the DSN: an error event for the
-weapon and the shield, and a span trace for the boss spawn. The page server then
-reads Sentry's record of it from the Sentry API (the issue, its stack trace or
-breadcrumbs, or the trace's spans) and the Incident Console shows that, with a
-link to it in Sentry. The token stays in the page server: it is never served to
-the page or written anywhere. The page's CSP lets it contact only this server
-and the DSN's ingest origin. If Sentry doesn't accept the report or can't return
-it within about 15 seconds, that incident shows simulated evidence with a note
+weapon and the shield, and a `boss-spawn` transaction with one span per load for
+the boss. The page server then reads Sentry's record of it from the Sentry API
+(the issue, its stack trace or breadcrumbs, or the trace's spans) and the
+Incident Console shows that, with a link to it in Sentry. The boss's
+`boot_state` pills are the game's own state, labelled as such. Only requests
+from the page itself are answered, and repeated requests for one report share a
+single lookup. The token stays in the page server: it is never served to the
+page or written anywhere. The page's CSP lets it contact only this server and
+the DSN's ingest origin. If Sentry doesn't accept the report or can't return it
+within about 15 seconds, that incident shows simulated evidence with a note
 saying so. Setup prints `(live Sentry mode)` after the URL when live mode is on,
 and a note when `sentry.json` is filled in but the token is missing.
 

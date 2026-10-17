@@ -33,6 +33,16 @@ export const WEAPON_STACK_FRAMES = [
   { functionName: 'requestAnimationFrame', file: '<browser>', line: 0, inApp: false },
 ];
 
+/** Where the shield failure's live report says it happened; the same unit test checks this line. */
+export const SHIELD_STACK_FRAMES = [
+  {
+    functionName: 'resolveShieldHit',
+    file: 'game/src/shield/shield.mjs',
+    line: 17,
+    inApp: true,
+  },
+];
+
 /** The canonical boss waterfall: the four loads, back to back. */
 export const SEQUENTIAL_BOSS_SPANS = [
   { name: 'loadTextures', operation: 'game.resource.load', startMs: 0, durationMs: 1_200 },

@@ -32,7 +32,10 @@ import {
   IllegalBugTransitionError,
   IncidentTracker,
 } from '../challenges/glitch-invaders/game/src/bugs/incident-tracker.mjs';
-import { WEAPON_STACK_FRAMES } from '../challenges/glitch-invaders/game/src/diagnostics/evidence-builders.mjs';
+import {
+  SHIELD_STACK_FRAMES,
+  WEAPON_STACK_FRAMES,
+} from '../challenges/glitch-invaders/game/src/diagnostics/evidence-builders.mjs';
 import {
   FALLBACK_NOTES,
   LiveEvidenceProvider,
@@ -51,10 +54,12 @@ import { idleInput } from '../challenges/glitch-invaders/game/src/engine/world.m
 import { SentryReporter } from '../challenges/glitch-invaders/game/src/sentry/reporter.mjs';
 import { WeaponConfigError } from '../challenges/glitch-invaders/game/src/weapons/weapons.mjs';
 import { runCleanup } from '../challenges/glitch-invaders/server/cleanup.mjs';
+import { createEvidenceLookup } from '../challenges/glitch-invaders/server/page-server.mjs';
 import { resolveStatePaths } from '../challenges/glitch-invaders/server/paths.mjs';
 import { SentryApi } from '../challenges/glitch-invaders/server/sentry-api.mjs';
 import { runSetup } from '../challenges/glitch-invaders/server/setup.mjs';
 import { BUG_IDS, createProgress, monitorStateLine } from '../challenges/glitch-invaders/shared/progress.mjs';
+import { isSentryApiOrigin } from '../challenges/glitch-invaders/shared/runtime-config.mjs';
 
 const runFile = promisify(execFile);
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
@@ -433,7 +438,8 @@ function bossSpanRows() {
  * Start a local stand-in for the Sentry API that answers the routes the page server calls from
  * `routes` (pathname to body, or a status number), records each request, and closes when the test
  * ends. `outage` makes every route answer 503, and `unindexedRequests` makes that many first
- * requests answer 404, as Sentry does before it has indexed a report.
+ * requests answer 404, as Sentry does before it has indexed a report. Every refusal echoes the
+ * request's Authorization header, so a server that forwarded Sentry's error body would leak it.
  */
 function startSentryStandIn(testContext, options = {}) {
   const routes = {
@@ -454,7 +460,7 @@ function startSentryStandIn(testContext, options = {}) {
       const unindexed = requests.length <= (options.unindexedRequests ?? 0);
       const route = options.outage ? 503 : unindexed ? 404 : (routes[url.pathname] ?? 404);
       if (typeof route === 'number') {
-        response.writeHead(route).end('{"detail":"stand-in refusal"}');
+        response.writeHead(route).end(JSON.stringify({ detail: incoming.headers.authorization }));
 
         return;
       }
@@ -522,7 +528,7 @@ async function startLivePackage(testContext, packageDir, extraEnv) {
   const setup = await runPackageHook(packageDir, 'setup', env);
   assert.equal(setup.code, 0, setup.output);
 
-  return { base: `http://127.0.0.1:${port}`, output: setup.output, workspace };
+  return { base: `http://127.0.0.1:${port}`, output: setup.output, workspace, packageDir, env };
 }
 
 /** Start a live stack: a Sentry stand-in, a live package copy, and its server with the token. */
@@ -577,16 +583,17 @@ function weaponEncounterFactory() {
   };
 }
 
-test('weapon stack trace frames point at the real lines of the calls they name', () => {
+test('weapon and shield stack trace frames point at the real lines of the calls they name', () => {
   const callAtLine = {
     fireWeapon: 'throw new WeaponConfigError',
     'GameEngine.tryFire': 'fireWeapon(',
     'GameEngine.updatePlayer': 'this.tryFire()',
     'GameEngine.update': 'this.updatePlayer(',
     'GameLoop.frame': 'this.engine.update(',
+    resolveShieldHit: 'incomingDamage * SHIELD_BUG_MULTIPLIER',
   };
 
-  const inApp = WEAPON_STACK_FRAMES.filter((frame) => frame.inApp);
+  const inApp = [...WEAPON_STACK_FRAMES, ...SHIELD_STACK_FRAMES].filter((frame) => frame.inApp);
   assert.equal(inApp.length, Object.keys(callAtLine).length);
 
   for (const frame of inApp) {
@@ -1296,6 +1303,8 @@ test('live mode returns the boss trace as a waterfall from the spans Sentry inde
   );
   assert.equal(waterfall.totalMs, 2200);
   assert.equal(evidence.link.url, `https://mlh.sentry.io/explore/traces/trace/${BOSS_TRACE_ID}/`);
+  const context = evidence.sections.find((section) => section.kind === 'context');
+  assert.equal(context.caption, 'Local game state, not from Sentry');
   const query = stack.standIn.requests[0].url.searchParams;
   assert.equal(query.get('dataset'), 'spans');
   assert.equal(query.get('query'), `trace:${BOSS_TRACE_ID} span.op:game.resource.load`);
@@ -1316,12 +1325,18 @@ test('the token never appears in a response, a page asset, the workspace, or hoo
   const stack = await startLiveStack(testContext);
   const outage = await startLiveStack(testContext, { outage: true });
 
+  const gameAssets = (await readdir(path.join(packageDirectory, 'game'), { recursive: true }))
+    .filter((file) => path.extname(file) !== '')
+    .map((file) => `${stack.base}/${file.split(path.sep).join('/')}`);
+  const sharedAssets = (await readdir(path.join(packageDirectory, 'shared'))).map(
+    (file) => `${stack.base}/shared/${file}`,
+  );
   const bodies = await Promise.all(
     [
-      `${stack.base}/`,
-      `${stack.base}/src/main.mjs`,
-      `${stack.base}/src/sentry/reporter.mjs`,
+      ...gameAssets,
+      ...sharedAssets,
       `${stack.base}/runtime-config.json`,
+      `${stack.base}/api/progress`,
       `${stack.base}/api/sentry-evidence?bug=weapon&id=${WEAPON_EVENT_ID}`,
       `${stack.base}/api/sentry-evidence?bug=boss&id=not-an-id`,
       `${outage.base}/api/sentry-evidence?bug=shield&id=${SHIELD_EVENT_ID}`,
@@ -1338,7 +1353,9 @@ test('the token never appears in a response, a page asset, the workspace, or hoo
       .map((entry) => readFile(path.join(entry.parentPath, entry.name), 'utf8')),
   );
 
-  for (const text of [...bodies, ...stored, stack.output, outage.output]) {
+  const cleanup = await runPackageHook(stack.packageDir, 'cleanup', stack.env);
+
+  for (const text of [...bodies, ...stored, stack.output, outage.output, cleanup.output]) {
     assert.ok(!text.includes(SENTRY_TOKEN), `the token leaked into: ${text.slice(0, 200)}`);
   }
   assert.match(stack.output, /\(live Sentry mode\)/);
@@ -1371,7 +1388,7 @@ test('SentryApi waits while Sentry is still indexing an event, then returns it',
     },
   });
 
-  const event = await api.event(WEAPON_EVENT_ID);
+  const event = await api.event(WEAPON_EVENT_ID, new AbortController().signal);
 
   assert.equal(event.eventID, WEAPON_EVENT_ID);
   assert.deepEqual(waits, [1_000, 2_000]);
@@ -1389,7 +1406,7 @@ test('SentryApi gives up as unavailable once Sentry never indexes the report', a
     sleep: async () => {},
   });
 
-  await assert.rejects(api.traceSpans(BOSS_TRACE_ID), {
+  await assert.rejects(api.traceSpans(BOSS_TRACE_ID, new AbortController().signal), {
     name: 'SentryUnavailableError',
     message: 'Sentry has not indexed the report yet',
   });
@@ -1478,6 +1495,86 @@ test('SentryReporter sends the boss stall as a boss-spawn transaction with one s
     [
       ['loadTextures', 'game.resource.load', 1200],
       ['loadSounds', 'game.resource.load', 1000],
+    ],
+  );
+});
+
+for (const [apiUrl, allowed] of [
+  ['https://sentry.io', true],
+  ['https://de.sentry.io', true],
+  ['http://127.0.0.1:8123', true],
+  ['http://localhost:8123', true],
+  ['https://sentry.io.evil.example', false],
+  ['https://evilsentry.io', false],
+  ['https://sentry.io:8443', false],
+  ['http://sentry.io', false],
+  ['https://sentry.io/api', false],
+  ['http://10.0.0.5:8123', false],
+]) {
+  test(`the token may go to ${apiUrl}: ${allowed}`, () => {
+    const verdict = isSentryApiOrigin(apiUrl);
+
+    assert.equal(verdict, allowed);
+  });
+}
+
+test('SentryApi stops waiting and fails as unavailable once its deadline passes', async (testContext) => {
+  const standIn = await startSentryStandIn(testContext, { unindexedRequests: 10 });
+  const deadline = new AbortController();
+  const api = new SentryApi({
+    apiUrl: standIn.url,
+    org: 'mlh',
+    project: 'glitch-invaders',
+    token: SENTRY_TOKEN,
+    retryDelaysMs: [1_000, 2_000, 3_000],
+    sleep: async () => deadline.abort(),
+  });
+
+  await assert.rejects(api.event(WEAPON_EVENT_ID, deadline.signal), {
+    name: 'SentryUnavailableError',
+    message: 'Sentry took too long to return the report',
+  });
+  assert.equal(standIn.requests.length, 1);
+});
+
+test('live mode refuses a cross-site evidence request without calling Sentry', async (testContext) => {
+  const stack = await startLiveStack(testContext);
+
+  const crossSite = await getRaw(`${stack.base}/`, `/api/sentry-evidence?bug=weapon&id=${WEAPON_EVENT_ID}`, {
+    'sec-fetch-site': 'cross-site',
+  });
+  const otherOrigin = await getRaw(`${stack.base}/`, `/api/sentry-evidence?bug=weapon&id=${WEAPON_EVENT_ID}`, {
+    origin: 'https://evil.example',
+  });
+
+  assert.equal(crossSite.status, 403);
+  assert.equal(otherOrigin.status, 403);
+  assert.equal(stack.standIn.requests.length, 0);
+});
+
+test('the evidence lookup shares one Sentry lookup among concurrent requests for a report', async () => {
+  const calls = [];
+  let finish;
+  const lookup = createEvidenceLookup((bug, id, signal) => {
+    calls.push({ bug, id, signal });
+
+    return new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+
+  const first = lookup('weapon', WEAPON_EVENT_ID);
+  const second = lookup('weapon', WEAPON_EVENT_ID);
+  const other = lookup('shield', SHIELD_EVENT_ID);
+  finish({ source: 'live' });
+
+  assert.equal(second, first);
+  assert.notEqual(other, first);
+  assert.deepEqual(
+    calls.map((call) => [call.bug, call.id, call.signal instanceof AbortSignal]),
+    [
+      ['weapon', WEAPON_EVENT_ID, true],
+      ['shield', SHIELD_EVENT_ID, true],
     ],
   );
 });

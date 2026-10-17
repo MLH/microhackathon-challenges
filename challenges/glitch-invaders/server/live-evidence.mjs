@@ -16,6 +16,9 @@ const SHOWN_BREADCRUMBS = 8;
 /** The context each error event carries, which the console shows as pills. */
 const CONTEXT_NAMES = { weapon: 'weapon_state', shield: 'shield_state' };
 
+/** Marks the boss context as the game's own state, since the trace Sentry returns carries none. */
+const LOCAL_STATE_CAPTION = 'Local game state, not from Sentry';
+
 /** The breadcrumb levels the console has glyphs for; Sentry's others fold into these. */
 const CONSOLE_LEVELS = { info: 'info', warning: 'warning', error: 'error', fatal: 'error' };
 
@@ -102,13 +105,13 @@ function contextSection(event, name) {
 }
 
 /** Evidence for the weapon or shield failure: its event and the issue Sentry grouped it into. */
-async function errorEvidence(api, bug, eventId) {
-  const event = await api.event(eventId);
+async function errorEvidence(api, bug, eventId, signal) {
+  const event = await api.event(eventId, signal);
   const exception = entryData(event, 'exception')?.values?.at(-1);
   if (exception === undefined || exception === null) {
     throw new SentryUnavailableError(`Sentry's event ${eventId} has no exception`);
   }
-  const issue = await api.issue(text(event.groupID));
+  const issue = await api.issue(text(event.groupID), signal);
   const permalink = httpsLink(issue.permalink);
   const primary =
     bug === 'weapon'
@@ -135,8 +138,8 @@ async function errorEvidence(api, bug, eventId) {
 }
 
 /** Evidence for the boss stall: the boss-spawn trace's load spans, as Sentry indexed them. */
-async function bossEvidence(api, traceId) {
-  const rows = await api.traceSpans(traceId);
+async function bossEvidence(api, traceId, signal) {
+  const rows = await api.traceSpans(traceId, signal);
   const starts = rows.map((row) => finite(row['precise.start_ts'], 'span start'));
   const firstStart = Math.min(...starts);
   const spans = rows.map((row, index) => ({
@@ -153,17 +156,18 @@ async function bossEvidence(api, traceId) {
     source: 'live',
     title: evidenceTitle({ bug: 'boss', stall: { totalMs: waterfall.totalMs } }),
     referenceId: `trace ${traceId.slice(0, 8)}`,
-    sections: [waterfall, bootStateSection()],
+    sections: [waterfall, { ...bootStateSection(), caption: LOCAL_STATE_CAPTION }],
     link: { label: 'Open the trace in Sentry', url: traceUrl },
   };
 }
 
 /**
  * Fetch the live evidence for the page's report `id` of `bug`: an event id for the weapon and
- * shield, a trace id for the boss.
+ * shield, a trace id for the boss. Every request and wait stops once `signal` aborts.
  *
- * @throws {SentryUnavailableError} when Sentry is down, slow to index, or answers with nonsense.
+ * @throws {SentryUnavailableError} when Sentry is down, slow to index, past the deadline, or answers
+ *   with nonsense.
  */
-export function fetchLiveEvidence(api, bug, id) {
-  return bug === 'boss' ? bossEvidence(api, id) : errorEvidence(api, bug, id);
+export function fetchLiveEvidence(api, bug, id, signal) {
+  return bug === 'boss' ? bossEvidence(api, id, signal) : errorEvidence(api, bug, id, signal);
 }

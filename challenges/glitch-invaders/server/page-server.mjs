@@ -50,25 +50,32 @@ function contentSecurityPolicy(runtimeConfig) {
 }
 
 /**
- * The longest a live-evidence request may take, however Sentry's retries and timeouts add up, so
- * the page falls back to simulated evidence promptly.
+ * The longest a live-evidence lookup may take, however Sentry's retries and timeouts add up, so
+ * the page falls back to simulated evidence promptly. Its requests and waits stop then too.
  */
 const EVIDENCE_DEADLINE_MS = 15_000;
 
-/** Settle with `work`, or reject with a {@link SentryUnavailableError} once `milliseconds` pass. */
-async function withDeadline(work, milliseconds) {
-  let timer;
-  const deadline = new Promise((_resolve, reject) => {
-    timer = setTimeout(
-      () => reject(new SentryUnavailableError('Sentry took too long to return the report')),
-      milliseconds,
+/**
+ * Share one Sentry lookup per report among the requests asking for it at once, each lookup under
+ * {@link EVIDENCE_DEADLINE_MS}, so repeated requests cannot multiply the calls on the token.
+ */
+export function createEvidenceLookup(fetchEvidence) {
+  const inFlight = new Map();
+
+  return (bug, id) => {
+    const key = `${bug}:${id}`;
+    const running = inFlight.get(key);
+    if (running !== undefined) {
+      return running;
+    }
+
+    const lookup = fetchEvidence(bug, id, AbortSignal.timeout(EVIDENCE_DEADLINE_MS)).finally(() =>
+      inFlight.delete(key),
     );
-  });
-  try {
-    return await Promise.race([work, deadline]);
-  } finally {
-    clearTimeout(timer);
-  }
+    inFlight.set(key, lookup);
+
+    return lookup;
+  };
 }
 
 /** The ids the page gives its Sentry reports: 32 lowercase hex digits for events and traces. */
@@ -101,6 +108,16 @@ function hostIsLoopback(request) {
   const host = request.headers.host ?? '';
 
   return allowedOrigins(request).some((origin) => origin === `http://${host}`);
+}
+
+/**
+ * Whether a request came from this page by Fetch Metadata as well as by Origin, for a read that
+ * spends something: a cross-site GET from an image or a link sends no Origin.
+ */
+function isSameOrigin(request) {
+  const site = request.headers['sec-fetch-site'];
+
+  return originIsOwn(request) && (site === undefined || site === 'same-origin');
 }
 
 /** Whether a state-changing request came from this page rather than another site. */
@@ -274,16 +291,22 @@ async function handleProgress(request, response, options) {
 
 /**
  * Handle `/api/sentry-evidence?bug=<bug>&id=<report id>`: 200 with live evidence, 404 in demo
- * mode, 400 for a bad query, and 502 naming the problem when Sentry cannot provide it.
+ * mode, 403 from another site, 400 for a bad query, and 502 naming the problem when Sentry cannot
+ * provide it. `lookupEvidence` is `undefined` in demo mode.
  */
-async function handleSentryEvidence(request, response, options) {
-  if (options.fetchEvidence === undefined) {
+async function handleSentryEvidence(request, response, lookupEvidence) {
+  if (lookupEvidence === undefined) {
     sendStatus(response, 404);
 
     return;
   }
   if (request.method !== 'GET') {
     sendStatus(response, 405);
+
+    return;
+  }
+  if (!isSameOrigin(request)) {
+    sendStatus(response, 403, 'cross-site evidence requests are not allowed');
 
     return;
   }
@@ -298,8 +321,7 @@ async function handleSentryEvidence(request, response, options) {
   }
 
   try {
-    const evidence = await withDeadline(options.fetchEvidence(bug, id), EVIDENCE_DEADLINE_MS);
-    sendJson(response, 200, evidence);
+    sendJson(response, 200, await lookupEvidence(bug, id));
   } catch (error) {
     if (error instanceof SentryUnavailableError) {
       sendStatus(response, 502, error.message);
@@ -352,11 +374,13 @@ async function handleStatic(pathname, response, gameDir) {
  * Create the page server. The caller decides when and where it listens.
  *
  * @param {{ gameDir: string, progressFile: string, runtimeConfig: object,
- *   fetchEvidence?: (bug: string, id: string) => Promise<object> }} options `fetchEvidence` is
- *   given only in live mode.
+ *   fetchEvidence?: (bug: string, id: string, signal: AbortSignal) => Promise<object> }} options
+ *   `fetchEvidence` is given only in live mode, and stops its work once `signal` aborts.
  */
 export function createPageServer(options) {
   const policy = contentSecurityPolicy(options.runtimeConfig);
+  const lookupEvidence =
+    options.fetchEvidence === undefined ? undefined : createEvidenceLookup(options.fetchEvidence);
 
   return createServer((request, response) => {
     response.setHeader('content-security-policy', policy);
@@ -377,7 +401,7 @@ export function createPageServer(options) {
       } else if (pathname === '/api/progress') {
         await handleProgress(request, response, options);
       } else if (pathname === '/api/sentry-evidence') {
-        await handleSentryEvidence(request, response, options);
+        await handleSentryEvidence(request, response, lookupEvidence);
       } else if (request.method === 'GET' || request.method === 'HEAD') {
         await handleStatic(pathname, response, options.gameDir);
       } else {

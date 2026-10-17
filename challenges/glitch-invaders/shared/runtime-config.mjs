@@ -33,16 +33,24 @@ function isSlug(value) {
   return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
 }
 
-/** Whether `apiUrl` is an HTTPS origin, or a plain-HTTP loopback one such as a local stand-in. */
-function isApiOrigin(apiUrl) {
+/**
+ * Whether `apiUrl` is a Sentry API origin the token may go to: `https://sentry.io` or a subdomain of
+ * it, or a plain-HTTP loopback origin such as a local stand-in. Any other host would receive the
+ * real token in `boothstrap dev` or a standalone run.
+ */
+export function isSentryApiOrigin(apiUrl) {
   const url = URL.parse(apiUrl);
   if (url === null || url.origin !== apiUrl) {
     return false;
   }
+  if (url.protocol === 'http:') {
+    return ['127.0.0.1', 'localhost'].includes(url.hostname);
+  }
 
   return (
-    url.protocol === 'https:' ||
-    (url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))
+    url.protocol === 'https:' &&
+    url.port === '' &&
+    (url.hostname === 'sentry.io' || url.hostname.endsWith('.sentry.io'))
   );
 }
 
@@ -68,8 +76,8 @@ export function parseSentrySettings(value) {
   if (typeof project !== 'string' || !isSlug(project)) {
     throw new InvalidRuntimeConfigError('sentry.project must be a Sentry slug');
   }
-  if (typeof apiUrl !== 'string' || !isApiOrigin(apiUrl)) {
-    throw new InvalidRuntimeConfigError('sentry.apiUrl must be an HTTPS origin');
+  if (typeof apiUrl !== 'string' || !isSentryApiOrigin(apiUrl)) {
+    throw new InvalidRuntimeConfigError('sentry.apiUrl must be https://sentry.io or a subdomain');
   }
 
   return { dsn, org, project, apiUrl };

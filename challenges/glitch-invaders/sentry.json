@@ -1,5 +1,5 @@
 {
-  "$comment": "Public settings for live Sentry mode; none is a secret. MLH fills these in from its Sentry project: dsn from Project Settings > Client Keys (DSN), org and project from the slugs in the project's URL. While any value is still a <placeholder>, the game runs in demo mode. Live mode also needs SENTRY_AUTH_TOKEN, which the station's vault provides; never put a token here. An optional apiUrl replaces the Sentry API origin, https://sentry.io; tests point it at a local stand-in.",
+  "$comment": "Public settings for live Sentry mode; none is a secret. MLH fills these in from its Sentry project: dsn from Project Settings > Client Keys (DSN), org and project from the slugs in the project's URL. While any value is still a <placeholder>, the game runs in demo mode. Live mode also needs SENTRY_AUTH_TOKEN, which the station's vault provides; never put a token here. An optional apiUrl replaces the Sentry API origin, https://sentry.io, with a subdomain of it or a loopback stand-in for tests; the token goes to no other host.",
   "dsn": "<https://public-key@o0.ingest.us.sentry.io/0>",
   "org": "<org-slug>",
   "project": "<project-slug>"

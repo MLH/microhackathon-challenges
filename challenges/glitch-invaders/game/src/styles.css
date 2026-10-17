@@ -731,6 +731,11 @@ kbd {
   border-color: #ffffff;
 }
 
+.context-caption {
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
 .context-pills {
   display: flex;
   flex-wrap: wrap;
