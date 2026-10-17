@@ -38,9 +38,8 @@ only because someone asks: its condition must hold.
 
 Open the drawing page right away, as your first action once the challenge
 starts (after `session_info`, when you have it): call `show_preview` with
-`http://127.0.0.1:4322/` without asking first. This challenge overrides the
-station's ask-first rule for `show_preview`, because the page is the
-challenge. Without `show_preview`, give them that URL to open right away.
+`http://127.0.0.1:4322/` without asking first. Without `show_preview`, give
+them that URL to open right away.
 
 When you resume with `draw-bird` not yet complete, first use `bash` to check
 whether `bird.png` exists in the current directory: a save made just before
