@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Glitch Invaders: On-Call</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%2315171c'/%3E%3Cpath d='M3 5h10v6H3z' fill='%23e73427'/%3E%3C/svg%3E" />
+    <link rel="stylesheet" href="/src/styles.css" />
+  </head>
+  <body>
+    <div id="app" class="app">
+      <header class="topbar" id="topbar">
+        <h1 class="brand">
+          <span class="brand-mark" aria-hidden="true">◆</span>
+          Glitch Invaders <span class="brand-sub">On-Call</span>
+        </h1>
+        <ul class="stats" aria-label="Ship status">
+          <li>HULL <b id="stat-hull">3</b></li>
+          <li>SHIELD <b id="stat-shield">off</b></li>
+          <li>SQUASHED <b id="stat-kills">0</b></li>
+          <li>SCORE <b id="stat-score">0</b></li>
+        </ul>
+        <span id="mode-badge" class="badge" title="Demo mode: the diagnostics are realistic simulations.">DEMO · simulated evidence</span>
+        <button type="button" class="topbar-reset" id="reset-run" title="Reset and start a fresh run">Reset ↺</button>
+      </header>
+
+      <main class="stage-wrap" id="stage-wrap">
+        <div
+          id="stage"
+          class="stage"
+          tabindex="-1"
+          role="application"
+          aria-label="Game arena. Left and right arrows move. Space fires. P pauses."
+        >
+          <canvas id="arena" class="arena" aria-hidden="true"></canvas>
+          <div id="boss-loading" class="boss-loading" hidden></div>
+          <div id="banner" class="banner" role="status" hidden></div>
+        </div>
+      </main>
+
+      <footer class="dock" id="dock">
+        <section class="card objective" aria-labelledby="objective-title">
+          <h2 class="card-title" id="objective-title">Objective</h2>
+          <p class="objective-text" id="objective-text"></p>
+          <p class="objective-detail" id="objective-detail"></p>
+          <ol class="incidents" id="incidents" aria-label="Incidents"></ol>
+        </section>
+        <section class="card controls" aria-labelledby="controls-title">
+          <h2 class="card-title" id="controls-title">Controls</h2>
+          <div class="pads">
+            <button type="button" class="pad" id="pad-left" aria-label="Move left">◀</button>
+            <button type="button" class="pad pad-fire" id="pad-fire" aria-label="Fire">FIRE</button>
+            <button type="button" class="pad" id="pad-right" aria-label="Move right">▶</button>
+          </div>
+          <div class="control-links">
+            <button type="button" class="link-button" id="skip-ahead">Skip ahead ▸▸</button>
+            <button type="button" class="link-button link-button-muted" id="reset-controls">Reset ↺</button>
+          </div>
+        </section>
+      </footer>
+
+      <div id="overlay-root" class="overlay-root" hidden></div>
+    </div>
+
+    <p id="boothstrap-state" class="state-line">glitch-state v1 launched=no weapon=unseen shield=unseen boss=unseen completed=no mode=demo</p>
+    <p id="save-error" class="save-error" role="alert" hidden>Progress can't be saved; reload the page.</p>
+    <div id="announcer" class="visually-hidden" role="status" aria-live="polite"></div>
+    <noscript>Glitch Invaders needs JavaScript. Open this page in Chrome.</noscript>
+    <script type="module" src="/src/main.mjs"></script>
+  </body>
+</html>

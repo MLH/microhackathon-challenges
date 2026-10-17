@@ -13,6 +13,7 @@ links to the package's own README.
 | [hello-world](challenges/hello-world/README.md) | Meet your AI guide and make your first file. |
 | [vibe-coding-mad-libs](challenges/vibe-coding-mad-libs/README.md) | Fill four blanks, and Pi builds the web app you described. |
 | [birdsbirdbirds](challenges/birdsbirdbirds/README.md) | Draw a bird and watch it fly across the sky. |
+| [glitch-invaders](challenges/glitch-invaders/README.md) | Shoot the bugs, then debug the three that fight back using Sentry evidence. |
 
 Challenges follow the contract in boothstrap.sh's challenge spec and
 authoring guide; agents working here start from [AGENTS.md](AGENTS.md).

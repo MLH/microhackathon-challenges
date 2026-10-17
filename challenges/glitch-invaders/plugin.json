@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "glitch-invaders",
+  "version": "1.0.0",
+  "description": "Glitch Invaders: On-Call. Play an arcade run, hit three intentional failures, and debug them with Sentry evidence."
+}
