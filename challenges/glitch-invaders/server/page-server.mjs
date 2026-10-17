@@ -1,5 +1,5 @@
 /**
- * The page server: serves the built game, this attempt's runtime config, and the progress file
+ * The page server: serves the game, this attempt's runtime config, and the progress file
  * that lets a refresh or a restarted guide pick up the run. Node built-ins only, because a
  * Boothstrap package runs wherever it is unpacked and cannot import the repository's dependencies.
  */
@@ -237,7 +237,7 @@ async function handleProgress(request, response, options) {
 }
 
 /** Serve a file from the game directory (or `/shared/`), with `/` meaning `index.html`. */
-async function handleStatic(pathname, response, distDir) {
+async function handleStatic(pathname, response, gameDir) {
   let decoded;
   try {
     decoded = decodeURIComponent(pathname);
@@ -247,7 +247,7 @@ async function handleStatic(pathname, response, distDir) {
     return;
   }
   const isShared = decoded.startsWith('/shared/');
-  const baseDir = isShared ? path.resolve(distDir, '..', 'shared') : path.resolve(distDir);
+  const baseDir = isShared ? path.resolve(gameDir, '..', 'shared') : path.resolve(gameDir);
   const relative =
     decoded === '/' ? 'index.html' : isShared ? decoded.slice('/shared/'.length) : decoded.slice(1);
   const file = path.resolve(baseDir, relative);
@@ -294,7 +294,7 @@ export function createPageServer(options) {
       } else if (pathname === '/api/progress') {
         await handleProgress(request, response, options);
       } else if (request.method === 'GET' || request.method === 'HEAD') {
-        await handleStatic(pathname, response, options.distDir);
+        await handleStatic(pathname, response, options.gameDir);
       } else {
         sendStatus(response, 405);
       }

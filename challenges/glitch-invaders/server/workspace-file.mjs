@@ -124,7 +124,13 @@ export async function writeWorkspaceFile(file, contents) {
     throw error;
   }
   await handle.close();
-  await rename(temporary, file);
+
+  try {
+    await rename(temporary, file);
+  } catch (error) {
+    await rm(temporary, { force: true });
+    throw error;
+  }
 }
 
 /**

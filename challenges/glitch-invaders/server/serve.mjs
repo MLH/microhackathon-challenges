@@ -29,7 +29,7 @@ function readArguments(argv) {
 function main() {
   const { port, runtimeConfigFile, progressFile } = readArguments(process.argv.slice(2));
   const runtimeConfig = parseRuntimeConfig(JSON.parse(readFileSync(runtimeConfigFile, 'utf8')));
-  const server = createPageServer({ distDir: GAME_DIR, progressFile, runtimeConfig });
+  const server = createPageServer({ gameDir: GAME_DIR, progressFile, runtimeConfig });
 
   server.once('error', (error) => {
     report({ listening: false, error: error.message });

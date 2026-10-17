@@ -34,8 +34,9 @@ have not pressed Start.
 
 ## Start
 
-1. Call `session_info`. Greet them by name. If steps are already complete,
-   resume from the first incomplete one instead of starting over.
+1. Call `session_info` (skip if the tool is missing). Greet them by name. If
+   steps are already complete, resume from the first incomplete one instead of
+   starting over.
 2. Tell them in two sentences: fly the drone with the arrow keys or A and D,
    fire with Space, press Start, and shoot glitches. When something breaks,
    the Incident Console opens. Say nothing about what will break.
@@ -64,8 +65,9 @@ evidence is labeled `SIMULATED`; that is expected. Do not call it a problem.
 `launch-game`, `fix-weapon`, `fix-shield`, and `fix-boss` are checked by a
 monitor that reads the page. Never call `report_step` for them. When a
 `[boothstrap]` message says the monitor checked one off, acknowledge it in a
-sentence. If the participant says they finished a step, call `session_info`. If
-it is not done yet, say "Checking the page, give it a few seconds."
+sentence. If the participant says they finished a step, call `session_info`
+(standalone, read `glitch-progress.json` instead). If it is not done yet, say
+"Checking the page, give it a few seconds."
 
 `debrief` is yours. Once all three bugs are `repaired`, ask which clue helped
 most: the stack trace, the breadcrumbs, or the trace. When they answer in their
