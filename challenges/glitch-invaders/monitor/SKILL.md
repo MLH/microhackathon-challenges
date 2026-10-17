@@ -1,12 +1,16 @@
 ---
 name: monitor
-description: "Headless monitor for Glitch Invaders: On-Call. Reports steps from the game's state marker."
+description: "Headless monitor for Glitch Invaders: On-Call. Reports steps from the game's visible state line."
 ---
 
 # Glitch Invaders monitor
 
-Take one snapshot of the game page. Find the paragraph that starts with
-`glitch-state v1`. It is one line of fixed words, for example:
+Take one snapshot of the game page. If the snapshot is not
+`http://127.0.0.1:4373/`, call `list_pages`, `select_page` the
+`http://127.0.0.1:4373/` page, and take one snapshot of it.
+
+Find the line that starts with `glitch-state v1`. It is one line of fixed
+words, for example:
 
 ```text
 glitch-state v1 launched=yes weapon=repaired shield=encountered boss=unseen completed=no mode=demo

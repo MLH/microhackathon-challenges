@@ -1,10 +1,15 @@
 # Glitch Invaders: On-Call
 
 Fly a patch drone in Chrome, trigger three intentional bugs while defending the
-cluster, and debug each one with Sentry telemetry and Pi. Each failure opens an
+cluster, and debug each one with Sentry evidence and Pi. Each failure opens an
 Incident Console with a stack trace, breadcrumbs, or a performance trace, asks
 for the root cause, and applies your chosen patch so you can watch the fix work
 in play.
+
+The game always runs in demo mode: the Incident Console shows simulated Sentry
+evidence and no telemetry leaves the machine. Live Sentry mode returns once
+boothstrap provides sponsor settings; see
+[boothstrap.sh issue 519](https://github.com/MLH/boothstrap.sh/issues/519).
 
 ## Files
 
@@ -15,42 +20,25 @@ in play.
 | `skills/start-challenge/SKILL.md` | The guide Pi follows |
 | `monitor/SKILL.md` | Headless browser monitor skill |
 | `setup`, `cleanup` | Start and stop the server (`server/setup.mjs`, `server/cleanup.mjs`) |
-| `server/` | Local page server on `127.0.0.1:4373` and live-config resolver |
-| `shared/` | Progress and runtime configuration validators |
-| `game/` | Browser arcade game, Incident Console, and Sentry envelope reporter |
+| `server/` | Local page server on `127.0.0.1:4373` |
+| `shared/` | Progress validators |
+| `game/` | Browser arcade game and Incident Console |
 
-There is no `install` hook: the package has no dependencies beyond Node and browser
-ES modules.
+There is no `install` hook: the package has no dependencies beyond Node and
+browser ES modules.
 
 ## How steps advance
 
-The browser game writes `#boothstrap-state` with a single-line marker such as:
-
-```text
-glitch-state v1 launched=yes weapon=repaired shield=unseen boss=unseen completed=no mode=demo
-```
-
-The headless monitor reads that marker from the page's accessibility tree and
-reports `launch-game`, `fix-weapon`, `fix-shield`, and `fix-boss` as each step
-reaches `yes` or `repaired`. The game also saves `glitch-progress.json` in the
-workspace so Pi can see which bug and stage (`unseen`, `encountered`,
-`investigated`, `repaired`) the participant is on and emit non-PII milestone
-events. Once all three bugs are `repaired`, Pi asks which telemetry clue helped
-most and reports `debrief`.
+The game shows a `glitch-state v1` line, and the headless monitor reports
+`launch-game`, `fix-weapon`, `fix-shield`, and `fix-boss` from it, as
+[monitor/SKILL.md](monitor/SKILL.md) describes. The game also saves
+`glitch-progress.json` in the workspace so Pi can see which bug and stage
+(`unseen`, `encountered`, `investigated`, `repaired`) the participant is on and
+emit non-PII milestone events. Once all three bugs are `repaired`, Pi asks
+which clue helped most and reports `debrief`.
 
 The server listens on port 4373. Set `GLITCH_PORT` to use another port, though
 the challenge manifest expects 4373.
-
-## Modes
-
-- **Demo** (default): needs no Sentry credentials and renders deterministic
-  simulated evidence in the Incident Console.
-- **Live**: sends real error events (`WeaponConfigError`, `GameLogicError`) and
-  a `boss-spawn` performance trace to Sentry over HTTP envelopes, and links
-  directly to the issue or trace in Sentry. Set `GLITCH_SENTRY_DSN`,
-  `GLITCH_SENTRY_ORG`, and `GLITCH_SENTRY_PROJECT` (plus optional
-  `GLITCH_SENTRY_ENVIRONMENT`) in the environment, `.env`, or
-  `live.config.json`. Set `GLITCH_MODE=demo` to force demo mode.
 
 ## Run without boothstrap
 
@@ -79,5 +67,6 @@ When done:
 ```
 
 `cleanup` stops the server and removes `.glitch/` and `glitch-progress.json`.
-Without boothstrap there is no `report_step` or `emit_event`, so the skill
-acknowledges finished steps in plain words.
+Without boothstrap there is no `report_step`, `session_info`, or `emit_event`,
+so no monitor runs: the skill reads `glitch-progress.json` and acknowledges
+finished steps in plain words.

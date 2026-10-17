@@ -25,25 +25,25 @@
       "id": "launch-game",
       "title": "Launch your patch drone",
       "hint": "Press Start in the game, then shoot the first glitches.",
-      "done_when": "The page's #boothstrap-state text includes \"launched=yes\"."
+      "done_when": "The page shows the line \"glitch-state v1 …\" containing \"launched=yes\"."
     },
     {
       "id": "fix-weapon",
       "title": "Fix the jammed weapon",
       "hint": "Grab the gold upgrade and fire. Then trace the error in the Incident Console.",
-      "done_when": "The page's #boothstrap-state text includes \"weapon=repaired\"."
+      "done_when": "The page shows the line \"glitch-state v1 …\" containing \"weapon=repaired\"."
     },
     {
       "id": "fix-shield",
       "title": "Fix the shield that hurts",
       "hint": "Grab the blue shield and take a hit. Read the breadcrumbs, then patch it.",
-      "done_when": "The page's #boothstrap-state text includes \"shield=repaired\"."
+      "done_when": "The page shows the line \"glitch-state v1 …\" containing \"shield=repaired\"."
     },
     {
       "id": "fix-boss",
       "title": "Fix the slow boss spawn",
       "hint": "Clear the wave so the boss spawns. Find the bottleneck in the trace.",
-      "done_when": "The page's #boothstrap-state text includes \"boss=repaired\"."
+      "done_when": "The page shows the line \"glitch-state v1 …\" containing \"boss=repaired\"."
     },
     {
       "id": "debrief",

@@ -7,9 +7,9 @@ Three things will fail while you play:
 - a shield that makes damage worse
 - a boss that takes forever to spawn
 
-Each one sends telemetry to Sentry: a stack trace, breadcrumbs, or a
-performance trace. Open it in Sentry, find the root cause, choose the
-right patch, and watch the fix work in the game.
+Each failure opens an Incident Console that shows the Sentry evidence: a
+stack trace, breadcrumbs, or a performance trace. Read it, find the root
+cause, choose the right patch, and watch the fix work in the game.
 
 Your guide, Pi, is on the right. Ask it for a nudge any time. It won't
 hand you the answers.
