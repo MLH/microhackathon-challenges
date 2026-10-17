@@ -39,10 +39,8 @@ export class InputController {
     const keyDown = (event) => this.keyDown(event);
     const keyUp = (event) => this.keyUp(event);
     const blur = () => this.releaseAll();
-    const pointer = () => this.options.onActivity();
     target.addEventListener('keydown', keyDown);
     target.addEventListener('keyup', keyUp);
-    target.addEventListener('pointerdown', pointer);
     window.addEventListener('blur', blur);
 
     for (const control of Object.keys(pads)) {
@@ -52,7 +50,6 @@ export class InputController {
     return () => {
       target.removeEventListener('keydown', keyDown);
       target.removeEventListener('keyup', keyUp);
-      target.removeEventListener('pointerdown', pointer);
       window.removeEventListener('blur', blur);
       this.releaseAll();
     };
@@ -73,7 +70,6 @@ export class InputController {
   attachPad(control, button) {
     const press = (event) => {
       event.preventDefault();
-      this.options.onActivity();
       this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
       this.recompute();
     };
@@ -93,7 +89,6 @@ export class InputController {
       if (event.detail !== 0) {
         return;
       }
-      this.options.onActivity();
       this.pulse(control);
     });
   }
@@ -113,7 +108,6 @@ export class InputController {
 
   /** Handle a key press. */
   keyDown(event) {
-    this.options.onActivity();
     if (event.ctrlKey || event.metaKey || event.altKey) {
       return;
     }

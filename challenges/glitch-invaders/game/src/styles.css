@@ -77,11 +77,17 @@ ul {
   color: var(--danger);
 }
 
+body {
+  display: flex;
+  flex-direction: column;
+}
+
 .app {
   position: relative;
   display: grid;
+  flex: 1 1 auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  height: 100dvh;
+  min-height: 0;
 }
 
 .topbar {
@@ -130,20 +136,11 @@ ul {
 
 .badge {
   padding: 2px 10px;
-  border: 2px solid var(--border);
+  border: 2px solid var(--mlh-yellow);
+  color: var(--mlh-yellow);
   font-size: 12px;
   font-weight: 700;
   white-space: nowrap;
-}
-
-.badge[data-mode="demo"] {
-  border-color: var(--mlh-yellow);
-  color: var(--mlh-yellow);
-}
-
-.badge[data-mode="live"] {
-  border-color: var(--success);
-  color: var(--success);
 }
 
 .topbar-reset {
@@ -663,16 +660,6 @@ kbd {
   color: var(--mlh-yellow);
 }
 
-.source-badge[data-source="live"] {
-  border-color: var(--success);
-  color: var(--success);
-}
-
-.source-badge[data-source="live-unconfirmed"] {
-  border-color: var(--warning);
-  color: var(--warning);
-}
-
 .sentry-callout {
   display: flex;
   flex-direction: column;
@@ -691,10 +678,6 @@ kbd {
   }
 }
 
-.sentry-callout-compact {
-  padding: 8px 12px;
-}
-
 .sentry-callout-main {
   display: flex;
   flex-direction: column;
@@ -704,22 +687,6 @@ kbd {
 .sentry-callout-copy {
   color: var(--muted);
   font: 13px / 1.35 var(--sans);
-}
-
-.button-sentry {
-  flex-shrink: 0;
-  border-color: var(--mlh-yellow);
-  border-radius: 6px;
-  background: var(--mlh-blue);
-  color: #ffffff;
-  font: 700 13px var(--sans);
-  text-decoration: none;
-  white-space: nowrap;
-  text-align: center;
-}
-
-.button-sentry:hover {
-  border-color: #ffffff;
 }
 
 .context-pills {
@@ -747,41 +714,6 @@ kbd {
   margin: 0;
   color: var(--focus);
   font-weight: 700;
-}
-
-.sentry-briefing {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-}
-
-.sentry-briefing-title {
-  margin: 0;
-  color: var(--accent);
-  font: 700 13px var(--mono);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
-.sentry-briefing-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.sentry-briefing-item {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  color: var(--fg);
-  font: 14px / 1.45 var(--sans);
 }
 
 .panel {

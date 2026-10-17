@@ -3,10 +3,16 @@
  * that lets a refresh or a restarted guide pick up the run. Node built-ins only, because a
  * Boothstrap package runs wherever it is unpacked and cannot import the repository's dependencies.
  */
-import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { MAX_PROGRESS_BYTES, parseProgress } from '../shared/progress.mjs';
+import {
+  readWorkspaceFile,
+  RefusedFileError,
+  removeWorkspaceFile,
+  writeWorkspaceFile,
+} from './workspace-file.mjs';
 
 /** The content types of the files the build produces. */
 const CONTENT_TYPES = {
@@ -21,11 +27,19 @@ const CONTENT_TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-/** Headers every response carries: nothing is cached, because a replay must never see old state. */
+/**
+ * Headers every response carries: nothing is cached, because a replay must never see old state, and
+ * the page may load and contact nothing but this server.
+ */
 const BASE_HEADERS = {
   'cache-control': 'no-store',
+  'content-security-policy':
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'",
   'x-content-type-options': 'nosniff',
 };
+
+/** How much of a refused upload the server reads and discards before it drops the connection. */
+const MAX_DISCARDED_BYTES = 4 * MAX_PROGRESS_BYTES;
 
 /** Send a JSON body. */
 function sendJson(response, status, body) {
@@ -60,40 +74,143 @@ function originIsOwn(request) {
   return origin === undefined || allowedOrigins(request).includes(origin);
 }
 
-/** Read the request body, refusing anything over `limit` bytes. */
-async function readBody(request, limit) {
-  const chunks = [];
-  let size = 0;
-  for await (const chunk of request) {
-    const buffer = chunk;
-    size += buffer.length;
-    if (size > limit) {
-      return null;
-    }
-    chunks.push(buffer);
-  }
+/** Read the request body, or resolve `null` and stop reading as soon as it passes `limit` bytes. */
+function readBody(request, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
 
-  return Buffer.concat(chunks).toString('utf8');
+    /** Collect a chunk, giving up once the body is too big. */
+    const onData = (chunk) => {
+      size += chunk.length;
+      if (size > limit) {
+        request.off('data', onData);
+        request.off('end', onEnd);
+        request.pause();
+        resolve(null);
+
+        return;
+      }
+      chunks.push(chunk);
+    };
+
+    /** Resolve with the whole body. */
+    const onEnd = () => resolve(Buffer.concat(chunks).toString('utf8'));
+
+    request.on('data', onData);
+    request.on('end', onEnd);
+    request.once('error', reject);
+  });
 }
 
-/** Write `contents` to `file` atomically, so a reader never sees half a file. */
-async function writeAtomic(file, contents) {
-  await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${process.pid}.tmp`;
-  await writeFile(temporary, contents, { mode: 0o600 });
-  await rename(temporary, file);
+/**
+ * Answer 413, then read and discard the rest of the body so the client can finish sending and read
+ * the answer instead of seeing a reset. Drops the connection once more than `MAX_DISCARDED_BYTES`
+ * arrive, so an endless upload cannot hold it open.
+ */
+function refuseOversizedBody(request, response) {
+  let discarded = 0;
+  request.on('data', (chunk) => {
+    discarded += chunk.length;
+    if (discarded > MAX_DISCARDED_BYTES) {
+      request.destroy();
+    }
+  });
+  // readBody pauses the body when it gives up; a paused stream stays paused when a listener is added.
+  request.resume();
+  sendStatus(response, 413, 'progress is too large');
+}
+
+/** Send the stored progress: 204 when there is none, 422 when the file is not a lone regular file. */
+async function sendProgress(response, progressFile) {
+  let contents;
+  try {
+    contents = await readWorkspaceFile(progressFile, MAX_PROGRESS_BYTES);
+  } catch (error) {
+    if (error instanceof RefusedFileError) {
+      sendStatus(response, 422, error.message);
+
+      return;
+    }
+    throw error;
+  }
+  if (contents === null) {
+    sendStatus(response, 204);
+
+    return;
+  }
+
+  response.writeHead(200, { ...BASE_HEADERS, 'content-type': CONTENT_TYPES['.json'] });
+  response.end(contents);
+}
+
+/** Validate a progress body as JSON for this attempt, or answer 400 or 409 and return `null`. */
+function parseProgressBody(body, response, attemptId) {
+  let progress;
+  try {
+    progress = parseProgress(JSON.parse(body));
+  } catch (error) {
+    sendStatus(response, 400, error instanceof Error ? error.message : 'invalid progress');
+
+    return null;
+  }
+  if (progress.attemptId !== attemptId) {
+    sendStatus(response, 409, 'progress belongs to another attempt');
+
+    return null;
+  }
+
+  return progress;
+}
+
+/** Store a progress body: 204, or 400/409/413/415/422 without writing anything. */
+async function saveProgress(request, response, options) {
+  if (!(request.headers['content-type'] ?? '').startsWith('application/json')) {
+    sendStatus(response, 415, 'progress must be JSON');
+
+    return;
+  }
+  if (Number(request.headers['content-length']) > MAX_PROGRESS_BYTES) {
+    refuseOversizedBody(request, response);
+
+    return;
+  }
+
+  const body = await readBody(request, MAX_PROGRESS_BYTES);
+  if (body === null) {
+    refuseOversizedBody(request, response);
+
+    return;
+  }
+  const progress = parseProgressBody(body, response, options.runtimeConfig.attemptId);
+  if (progress === null) {
+    return;
+  }
+
+  await answerRefusals(response, () =>
+    writeWorkspaceFile(options.progressFile, `${JSON.stringify(progress, null, 2)}\n`),
+  );
+}
+
+/** Run a workspace write and answer 204, or 422 when the file there is not a lone regular file. */
+async function answerRefusals(response, write) {
+  try {
+    await write();
+  } catch (error) {
+    if (error instanceof RefusedFileError) {
+      sendStatus(response, 422, error.message);
+
+      return;
+    }
+    throw error;
+  }
+  sendStatus(response, 204);
 }
 
 /** Handle `/api/progress`. */
 async function handleProgress(request, response, options) {
   if (request.method === 'GET') {
-    try {
-      const contents = await readFile(options.progressFile, 'utf8');
-      response.writeHead(200, { ...BASE_HEADERS, 'content-type': CONTENT_TYPES['.json'] });
-      response.end(contents);
-    } catch {
-      sendStatus(response, 204);
-    }
+    await sendProgress(response, options.progressFile);
 
     return;
   }
@@ -105,8 +222,7 @@ async function handleProgress(request, response, options) {
   }
 
   if (request.method === 'DELETE') {
-    await rm(options.progressFile, { force: true });
-    sendStatus(response, 204);
+    await answerRefusals(response, () => removeWorkspaceFile(options.progressFile));
 
     return;
   }
@@ -117,36 +233,19 @@ async function handleProgress(request, response, options) {
     return;
   }
 
-  if (!(request.headers['content-type'] ?? '').startsWith('application/json')) {
-    sendStatus(response, 415, 'progress must be JSON');
-
-    return;
-  }
-
-  const body = await readBody(request, MAX_PROGRESS_BYTES);
-  if (body === null) {
-    sendStatus(response, 413, 'progress is too large');
-
-    return;
-  }
-
-  try {
-    const progress = parseProgress(JSON.parse(body));
-    if (progress.attemptId !== options.runtimeConfig.attemptId) {
-      sendStatus(response, 409, 'progress belongs to another attempt');
-
-      return;
-    }
-    await writeAtomic(options.progressFile, `${JSON.stringify(progress, null, 2)}\n`);
-    sendStatus(response, 204);
-  } catch (error) {
-    sendStatus(response, 400, error instanceof Error ? error.message : 'invalid progress');
-  }
+  await saveProgress(request, response, options);
 }
 
 /** Serve a file from the game directory (or `/shared/`), with `/` meaning `index.html`. */
 async function handleStatic(pathname, response, distDir) {
-  const decoded = decodeURIComponent(pathname);
+  let decoded;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    sendStatus(response, 400, 'the path has a malformed percent-escape');
+
+    return;
+  }
   const isShared = decoded.startsWith('/shared/');
   const baseDir = isShared ? path.resolve(distDir, '..', 'shared') : path.resolve(distDir);
   const relative =
@@ -185,8 +284,10 @@ export function createPageServer(options) {
         return;
       }
 
-      const { pathname } = new URL(request.url ?? '/', 'http://localhost');
-      if (pathname === '/healthz') {
+      const pathname = URL.parse(request.url ?? '/', 'http://localhost')?.pathname;
+      if (pathname === undefined) {
+        sendStatus(response, 400, 'the request target is not a URL path');
+      } else if (pathname === '/healthz') {
         sendStatus(response, 200, 'ok');
       } else if (pathname === '/runtime-config.json') {
         sendJson(response, 200, options.runtimeConfig);

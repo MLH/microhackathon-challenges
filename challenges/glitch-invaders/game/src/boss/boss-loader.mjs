@@ -47,16 +47,12 @@ export function plannedLoadMs(strategy) {
   return durations.reduce((total, duration) => total + duration, 0);
 }
 
-/** Runs each load directly, recording nothing. */
-export const runWithoutSpans = (_name, _operation, work) => work();
-
-/** Run one load under the span runner, timing it against `startedAt`. */
+/** Run one load, timing it against `startedAt`. */
 async function runTask(task, options, startedAt, spans) {
-  const runSpan = options.runSpan ?? runWithoutSpans;
   const startMs = options.now() - startedAt;
   options.onTask?.({ name: task.name, phase: 'start', atMs: startMs });
 
-  await runSpan(task.name, LOAD_SPAN_OP, () => options.sleep(task.durationMs));
+  await options.sleep(task.durationMs);
 
   const endMs = options.now() - startedAt;
   spans.push({ name: task.name, op: LOAD_SPAN_OP, startMs, durationMs: endMs - startMs });

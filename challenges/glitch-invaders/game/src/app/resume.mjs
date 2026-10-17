@@ -1,7 +1,6 @@
 /**
  * Rebuilding a saved run after a refresh: the code the repaired bugs left behind, and the evidence
- * for a failure that was still open. Evidence rebuilt this way is always the simulated fixture,
- * because the live capture is gone and a second Sentry report would be a duplicate.
+ * for a failure that was still open.
  */
 import { BUG_IDS } from '../../../shared/progress.mjs';
 import { CORRECT_PATCH_IDS, createBrokenCodeState, tryRepair } from '../bugs/code-state.mjs';
@@ -51,7 +50,7 @@ export function canonicalEncounter(bug) {
     case 'boss':
       return {
         bug,
-        stall: { totalMs: 4_500, spans: [...SEQUENTIAL_BOSS_SPANS], traceId: null },
+        stall: { totalMs: 4_500, spans: [...SEQUENTIAL_BOSS_SPANS] },
       };
   }
 }

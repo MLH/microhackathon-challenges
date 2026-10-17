@@ -27,23 +27,10 @@ export class Hud {
   shield = requireElement('stat-shield');
   kills = requireElement('stat-kills');
   score = requireElement('stat-score');
-  badge = requireElement('mode-badge');
   objectiveText = requireElement('objective-text');
   objectiveDetail = requireElement('objective-detail');
   incidents = requireElement('incidents');
   chipSignature = '';
-
-  /** Show the mode badge once; it never changes during a run. */
-  showMode(mode, degraded) {
-    this.badge.dataset.mode = mode;
-    if (mode === 'demo') {
-      setText(this.badge, 'DEMO · simulated evidence');
-      this.badge.title = 'No Sentry credentials: the diagnostics are realistic simulations.';
-    } else {
-      setText(this.badge, degraded ? 'LIVE · Sentry unreachable' : 'LIVE · Sentry');
-      this.badge.title = 'Real errors, breadcrumbs, and traces are sent to Sentry.';
-    }
-  }
 
   /** Refresh every stat from the latest world and progress. */
   update(progress, world) {

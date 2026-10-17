@@ -30,12 +30,15 @@ export class InvalidProgressError extends Error {
 /** The largest request body the server accepts for a progress write. */
 export const MAX_PROGRESS_BYTES = 16 * 1024;
 
+/** The only mode the game runs in: the Incident Console shows simulated Sentry evidence. */
+export const MODE = 'demo';
+
 /** A fresh, unplayed run. */
-export function createProgress(attemptId, mode) {
+export function createProgress(attemptId) {
   return {
     version: 1,
     attemptId,
-    mode,
+    mode: MODE,
     launched: false,
     completed: false,
     score: 0,
@@ -148,8 +151,8 @@ export function parseProgress(value) {
       'attemptId must be 4 to 64 lowercase letters, digits, or hyphens',
     );
   }
-  if (!isOneOf(['demo', 'live'], record.mode)) {
-    throw new InvalidProgressError('mode must be demo or live');
+  if (record.mode !== MODE) {
+    throw new InvalidProgressError(`mode must be ${MODE}`);
   }
   const bugs = readRecord(record.bugs, 'bugs');
   if (!Array.isArray(record.milestones) || record.milestones.length > 200) {
@@ -159,7 +162,7 @@ export function parseProgress(value) {
   return {
     version: 1,
     attemptId: record.attemptId,
-    mode: record.mode,
+    mode: MODE,
     launched: readFlag(record, 'launched', 'progress'),
     completed: readFlag(record, 'completed', 'progress'),
     score: readCount(record, 'score', 'progress'),

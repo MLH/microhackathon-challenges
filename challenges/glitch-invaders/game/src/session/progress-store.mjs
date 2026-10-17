@@ -1,23 +1,6 @@
 /** Where a run's progress is kept so a refresh or an agent restart can pick up where it left off. */
 import { parseProgress } from '../../../shared/progress.mjs';
 
-/** Keeps progress in memory only. Used under `vite dev` and in tests. */
-export class MemoryProgressStore {
-  saved = null;
-
-  async load(attemptId) {
-    return this.saved?.attemptId === attemptId ? structuredClone(this.saved) : null;
-  }
-
-  async save(progress) {
-    this.saved = structuredClone(progress);
-  }
-
-  async clear() {
-    this.saved = null;
-  }
-}
-
 /** Keeps progress on the page server, which writes it into the participant's workspace. */
 export class HttpProgressStore {
   endpoint;

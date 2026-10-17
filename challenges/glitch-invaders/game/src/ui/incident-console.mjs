@@ -10,11 +10,6 @@ const SOURCE_BADGES = {
     label: 'DEMO · SIMULATED',
     note: 'Demo mode: realistic diagnostics, no Sentry account needed.',
   },
-  live: { label: 'LIVE SENTRY', note: 'Captured by the game and delivered to Sentry.' },
-  'live-unconfirmed': {
-    label: 'LIVE · LOCAL COPY',
-    note: 'Sentry could not confirm delivery. This is the game’s own capture of what it sent.',
-  },
 };
 
 /** The glyphs for breadcrumb levels; level is never color alone. */
@@ -184,7 +179,7 @@ export class IncidentConsole {
     }
   }
 
-  /** Evidence step: in Live mode, directs the participant to Sentry; in Demo mode, shows simulated capture. */
+  /** Evidence step: the simulated Sentry capture of the failure. */
   evidencePane() {
     const evidence = this.evidence;
     if (evidence === null) {
@@ -192,37 +187,7 @@ export class IncidentConsole {
         'p',
         { class: 'status', role: 'status' },
         h('span', { class: 'spinner', 'aria-hidden': 'true' }, '◌'),
-        ' Transmitting telemetry to Sentry…',
-      );
-    }
-
-    if (evidence.link !== null) {
-      return h(
-        'div',
-        { class: 'evidence' },
-        this.sentryHero(evidence),
-        renderSentryBriefing(evidence),
-        h(
-          'div',
-          { class: 'pane-actions' },
-          h(
-            'span',
-            { class: 'muted' },
-            `${evidence.bug === 'boss' ? 'Trace' : 'Event'} ${evidence.referenceId} · transmitted to Sentry`,
-          ),
-          h('span', { class: 'spacer' }),
-          onClick(
-            h(
-              'button',
-              { type: 'button', class: 'button', 'data-key': 'to-diagnose' },
-              'Continue to Diagnose ▶',
-            ),
-            () => {
-              this.pane = 'diagnose';
-              this.render();
-            },
-          ),
-        ),
+        ' Capturing telemetry…',
       );
     }
 
@@ -260,38 +225,8 @@ export class IncidentConsole {
     );
   }
 
-  /** Hero banner with the exception/trace headline and the primary "Investigate in Sentry" CTA. */
+  /** Banner with the exception or trace headline and how to read the capture. */
   sentryHero(evidence) {
-    const isTrace = evidence.bug === 'boss';
-    const subtitle =
-      evidence.link !== null
-        ? isTrace
-          ? 'Performance telemetry has been sent to Sentry. Open the trace in Sentry in a new tab, then return here to submit your findings.'
-          : 'Telemetry has been sent to Sentry. Open the issue in Sentry in a new tab to investigate, then return here to submit your findings.'
-        : 'Demo mode (Sentry not connected): inspect the simulated telemetry snapshot to identify the root cause.';
-
-    const sentryLink =
-      evidence.link === null
-        ? null
-        : h(
-            'a',
-            {
-              class: 'button button-sentry',
-              href: evidence.link.url,
-              target: '_blank',
-              rel: 'noopener',
-              'data-key': 'open-sentry',
-            },
-            `🔍 ${evidence.link.label} ↗`,
-          );
-
-    if (sentryLink !== null) {
-      sentryLink.addEventListener('click', () => {
-        this.pane = 'diagnose';
-        this.render();
-      });
-    }
-
     return h(
       'div',
       { class: 'sentry-callout' },
@@ -299,9 +234,12 @@ export class IncidentConsole {
         'div',
         { class: 'sentry-callout-main' },
         h('p', { class: 'evidence-head' }, evidence.title),
-        h('p', { class: 'sentry-callout-copy' }, subtitle),
+        h(
+          'p',
+          { class: 'sentry-callout-copy' },
+          'Demo mode (Sentry not connected): inspect the simulated telemetry snapshot to identify the root cause.',
+        ),
       ),
-      sentryLink,
     );
   }
 
@@ -315,28 +253,6 @@ export class IncidentConsole {
     return h(
       'div',
       { class: 'diagnose' },
-      this.evidence !== null && this.evidence.link !== null
-        ? h(
-            'div',
-            { class: 'sentry-callout sentry-callout-compact' },
-            h(
-              'span',
-              { class: 'sentry-callout-copy' },
-              'Need another look at the event in Sentry? Refresh the Sentry tab if spans are still indexing.',
-            ),
-            h(
-              'a',
-              {
-                class: 'button button-sentry',
-                href: this.evidence.link.url,
-                target: '_blank',
-                rel: 'noopener',
-                'data-key': 'open-sentry-diagnose',
-              },
-              `🔍 ${this.evidence.link.label} ↗`,
-            ),
-          )
-        : null,
       h('p', { class: 'question' }, definition.question),
       h(
         'div',
@@ -488,46 +404,6 @@ export class IncidentConsole {
   }
 }
 
-/** What to inspect inside the Sentry dashboard for each failure in Live mode. */
-const SENTRY_BRIEFINGS = {
-  weapon: [
-    'Click "Investigate in Sentry" above to open the captured issue in a new tab.',
-    'Inspect the Stack Trace to see which function and file threw the error.',
-    'Check the weapon_state context section in Sentry to compare the requested weapon ID against the registered weapon configurations.',
-  ],
-  shield: [
-    'Click "Investigate in Sentry" above to open the captured issue in a new tab.',
-    'Read the Breadcrumbs timeline in Sentry leading up to hull destruction.',
-    'Check the shield_state context section in Sentry to compare incoming projectile damage against the damage applied to your hull.',
-  ],
-  boss: [
-    'Click "Investigate trace in Sentry" above to open the performance trace in a new tab.',
-    'Inspect the Waterfall view under the boss-spawn root span.',
-    'Notice that all four game.resource.load child spans run one after another (sequentially) totaling 4.50 s, and identify which operation takes the longest.',
-  ],
-};
-
-/** Render the Sentry investigation checklist shown in Live mode. */
-function renderSentryBriefing(evidence) {
-  return h(
-    'div',
-    { class: 'sentry-briefing', 'aria-label': 'How to investigate in Sentry' },
-    h('h3', { class: 'sentry-briefing-title' }, 'What to look for in Sentry'),
-    h(
-      'ol',
-      { class: 'sentry-briefing-list' },
-      ...SENTRY_BRIEFINGS[evidence.bug].map((item, index) =>
-        h(
-          'li',
-          { class: 'sentry-briefing-item' },
-          h('span', { class: 'option-letter', 'aria-hidden': 'true' }, String(index + 1)),
-          h('span', {}, item),
-        ),
-      ),
-    ),
-  );
-}
-
 /** Render context tags as scannable pill badges. */
 function renderContextPills(section) {
   return h(
@@ -608,6 +484,19 @@ function crumbRow(entry) {
   );
 }
 
+/**
+ * Set `element`'s position through the CSSOM rather than a `style` attribute, which the page's
+ * Content-Security-Policy refuses without 'unsafe-inline'.
+ */
+function positioned(element, position) {
+  element.style.left = position.left;
+  if (position.width !== undefined) {
+    element.style.width = position.width;
+  }
+
+  return element;
+}
+
 /** A trace waterfall: one bar per span on a shared time axis, with the spawn budget marked. */
 function waterfall(totalMs, spans) {
   const axisMs = Math.max(totalMs, BOSS_SPAWN_BUDGET_MS);
@@ -637,14 +526,12 @@ function waterfall(totalMs, spans) {
         h(
           'span',
           { class: 'span-track', role: 'cell' },
-          h('span', {
-            class: 'span-bar',
-            style: `left:${percent(span.startMs)};width:${percent(span.durationMs)}`,
+          positioned(h('span', { class: 'span-bar' }), {
+            left: percent(span.startMs),
+            width: percent(span.durationMs),
           }),
-          h('span', {
-            class: 'span-budget',
-            style: `left:${percent(BOSS_SPAWN_BUDGET_MS)}`,
-            'aria-hidden': 'true',
+          positioned(h('span', { class: 'span-budget', 'aria-hidden': 'true' }), {
+            left: percent(BOSS_SPAWN_BUDGET_MS),
           }),
         ),
         h(

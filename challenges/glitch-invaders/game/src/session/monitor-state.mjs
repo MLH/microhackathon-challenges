@@ -1,17 +1,13 @@
 /**
  * The state surface for Boothstrap's browser monitor. The monitor can only read the page's
- * accessibility tree, so the state is a fixed-word line of visually hidden text; the full snapshot
- * is also on `window` for tests and for a guide that can evaluate scripts.
+ * accessibility tree, so the state is a fixed-word line of text on the page.
  */
 import { monitorStateLine } from '../../../shared/progress.mjs';
 
 /** The id of the element holding the state line. */
 export const STATE_ELEMENT_ID = 'boothstrap-state';
 
-/** The `window` property holding the latest progress snapshot. */
-export const STATE_WINDOW_KEY = '__GLITCH_STATE__';
-
-/** Write `progress` to the marker element and `window`. */
+/** Write `progress` to the marker element. */
 export function publishState(document, progress) {
   const element = document.getElementById(STATE_ELEMENT_ID);
   if (element === null) {
@@ -22,10 +18,4 @@ export function publishState(document, progress) {
   if (element.textContent !== line) {
     element.textContent = line;
   }
-  Object.defineProperty(document.defaultView ?? globalThis, STATE_WINDOW_KEY, {
-    value: structuredClone(progress),
-    configurable: true,
-    enumerable: false,
-    writable: true,
-  });
 }

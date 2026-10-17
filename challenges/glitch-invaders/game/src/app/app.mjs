@@ -4,15 +4,10 @@ import { loadBossResources } from '../boss/boss-loader.mjs';
 import { BUG_DEFINITIONS } from '../bugs/bug-definitions.mjs';
 import { tryRepair } from '../bugs/code-state.mjs';
 import { IncidentTracker } from '../bugs/incident-tracker.mjs';
-import { attachBreadcrumbs, BreadcrumbRecorder } from '../diagnostics/breadcrumbs.mjs';
-
-import { LiveEvidenceProvider } from '../diagnostics/live-evidence.mjs';
 import { SimulatedEvidenceProvider } from '../diagnostics/simulated-evidence.mjs';
 import { GameEngine } from '../engine/game-engine.mjs';
 import { createRandom } from '../engine/random.mjs';
 import { CanvasRenderer } from '../render/canvas-renderer.mjs';
-
-import { InactivityMonitor } from '../session/inactivity.mjs';
 import { publishState } from '../session/monitor-state.mjs';
 
 import { BossLoadingView } from '../ui/boss-loading.mjs';
@@ -20,13 +15,7 @@ import { onClick, setText } from '../ui/dom.mjs';
 import { Hud } from '../ui/hud.mjs';
 import { IncidentConsole } from '../ui/incident-console.mjs';
 import { InputController } from '../ui/input.mjs';
-import {
-  completionCard,
-  inactivityCard,
-  introCard,
-  OverlayHost,
-  pauseCard,
-} from '../ui/overlays.mjs';
+import { completionCard, introCard, OverlayHost, pauseCard } from '../ui/overlays.mjs';
 import { GameLoop } from './game-loop.mjs';
 import { canonicalEncounter, codeForProgress, firstOpenBug, waveForBug } from './resume.mjs';
 
@@ -59,10 +48,8 @@ export class GameApp {
   hud = new Hud();
   overlays = new OverlayHost(requireElement('overlay-root'));
   bossView = new BossLoadingView(requireElement('boss-loading'));
-  recorder;
   engine;
-  provider;
-  simulated = new SimulatedEvidenceProvider();
+  evidence = new SimulatedEvidenceProvider();
   incidentConsole;
   input;
   loop;
@@ -71,23 +58,17 @@ export class GameApp {
   progress;
   code;
   lastShieldHit = null;
-  lastBossTraceId = null;
   bannerTimer = null;
-  inactivity = null;
   pauseOpen = false;
   pendingStart = null;
 
   constructor(options, saved) {
     this.options = options;
     this.now = options.now ?? (() => performance.now());
-    this.progress =
-      saved === null
-        ? createProgress(options.config.attemptId, options.config.mode)
-        : { ...saved, mode: options.config.mode };
+    this.progress = saved ?? createProgress(options.config.attemptId);
     this.tracker = new IncidentTracker(this.progress);
     this.code = codeForProgress(this.progress);
 
-    this.recorder = new BreadcrumbRecorder(() => this.engine.world.time);
     this.engine = new GameEngine({
       random: createRandom(options.seed ?? DEFAULT_SEED),
       code: this.code,
@@ -95,13 +76,6 @@ export class GameApp {
       now: this.now,
       particleScale: options.reducedMotion ? 0.25 : 1,
     });
-    attachBreadcrumbs(this.engine, {
-      add: (breadcrumb) => {
-        this.recorder.add(breadcrumb);
-        options.reporter.add(breadcrumb);
-      },
-    });
-    this.provider = this.createProvider();
     this.incidentConsole = new IncidentConsole({
       progressOf: (bug) => this.progress.bugs[bug],
       markEvidenceViewed: (bug) => this.tracker.markEvidenceViewed(bug),
@@ -113,7 +87,6 @@ export class GameApp {
     const canvas = requireElement('arena');
     const renderer = new CanvasRenderer(canvas, { reducedMotion: options.reducedMotion });
     this.input = new InputController({
-      onActivity: () => this.inactivity?.noteActivity(),
       onPauseKey: () => this.togglePause(),
       isGameActive: () => !this.overlays.isOpen && this.engine.world.phase !== 'ready',
     });
@@ -129,7 +102,6 @@ export class GameApp {
   begin() {
     this.tracker.subscribe((progress) => this.onProgress(progress));
     this.engine.on((event) => this.onEvent(event));
-    this.hud.showMode(this.options.config.mode, false);
     publishState(document, this.progress);
 
     this.input.attach(document, {
@@ -139,7 +111,6 @@ export class GameApp {
     });
     document.addEventListener('keydown', (event) => this.onPauseCardKey(event));
     onClick(requireElement('skip-ahead'), () => {
-      this.inactivity?.noteActivity();
       this.engine.fastForward();
       this.stage.focus();
     });
@@ -149,49 +120,25 @@ export class GameApp {
         onClick(button, () => this.resetRun());
       }
     }
-    this.exposeDiagnostics();
-    this.startInactivityMonitor();
     this.showOpening();
     this.loop.start();
   }
 
-  /** Choose the evidence provider for the mode. */
-  createProvider() {
-    const { config, reporter } = this.options;
-    if (config.mode === 'live' && config.sentry !== null) {
-      return new LiveEvidenceProvider({
-        reporter,
-        settings: config.sentry,
-        attemptId: config.attemptId,
-        recorder: this.recorder,
-        clock: () => this.engine.world.time,
-      });
-    }
-
-    return this.simulated;
-  }
-
-  /** Run the boss spawn through the reporter, keeping the trace ID for the evidence link. */
-  async spawnBoss(strategy, onTask) {
-    const traced = await this.options.reporter.traceBossSpawn((runSpan) =>
-      loadBossResources({
-        strategy,
-        sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
-        now: this.now,
-        runSpan,
-        ...(onTask === undefined ? {} : { onTask }),
-      }),
-    );
-    this.lastBossTraceId = traced.traceId;
-
-    return traced.result;
+  /** Load the boss's resources under the strategy the current code uses. */
+  spawnBoss(strategy, onTask) {
+    return loadBossResources({
+      strategy,
+      sleep: (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+      now: this.now,
+      ...(onTask === undefined ? {} : { onTask }),
+    });
   }
 
   /** Show the briefing for a new run, or the welcome-back card for a saved one. */
   showOpening() {
     if (!this.progress.launched) {
       this.overlays.show(
-        introCard({ mode: this.progress.mode, returning: false, onStart: () => this.startRun() }),
+        introCard({ returning: false, onStart: () => this.startRun() }),
       );
 
       return;
@@ -226,7 +173,7 @@ export class GameApp {
       this.openRestoredIncident(bug);
     };
     this.overlays.show(
-      introCard({ mode: this.progress.mode, returning: true, onStart: () => this.resumeRun() }),
+      introCard({ returning: true, onStart: () => this.resumeRun() }),
     );
   }
 
@@ -322,7 +269,6 @@ export class GameApp {
                 startMs: span.startMs,
                 durationMs: span.durationMs,
               })),
-              traceId: this.lastBossTraceId,
             },
           });
         }
@@ -368,10 +314,10 @@ export class GameApp {
       `${definition.incidentLabel}: ${definition.title}. The Incident Console is open.`,
     );
 
-    void this.provider.evidenceFor(encounter).then((evidence) => this.deliverEvidence(evidence));
+    void this.evidence.evidenceFor(encounter).then((evidence) => this.deliverEvidence(evidence));
   }
 
-  /** A failure was restored from a saved run: reopen the console on simulated evidence. */
+  /** A failure was restored from a saved run: reopen the console on its evidence. */
   openRestoredIncident(bug) {
     this.input.releaseAll();
     this.incidentConsole.open(bug);
@@ -382,7 +328,7 @@ export class GameApp {
 
       return;
     }
-    void this.simulated
+    void this.evidence
       .evidenceFor(canonicalEncounter(bug))
       .then((evidence) => this.deliverEvidence(evidence));
   }
@@ -487,79 +433,5 @@ export class GameApp {
   /** Say something to screen readers. */
   announce(message) {
     setText(this.announcer, message);
-  }
-
-  /** Warn after a quiet stretch, then reset the run so nobody inherits it. */
-  startInactivityMonitor() {
-    const { config } = this.options;
-    let prior = null;
-    let pausedBefore = false;
-    const card = inactivityCard(() => this.inactivity?.noteActivity());
-
-    this.inactivity = new InactivityMonitor({
-      warningAfterMs: config.inactivityWarningMs,
-      resetAfterWarningMs: config.inactivityResetMs,
-      now: this.now,
-      onWarning: () => {
-        prior = this.overlays.current;
-        pausedBefore = this.engine.world.paused;
-        this.engine.pause();
-        this.input.releaseAll();
-        this.overlays.show(card.element);
-      },
-      onResume: () => {
-        if (prior === null) {
-          this.overlays.hide(this.stage);
-        } else {
-          this.overlays.show(prior);
-        }
-        if (!pausedBefore) {
-          this.engine.resume();
-        }
-      },
-      onReset: () => {
-        void this.options.store.clear().then(() => this.options.reload());
-      },
-    });
-
-    setInterval(() => {
-      if (!this.progress.launched) {
-        this.inactivity?.noteActivity();
-
-        return;
-      }
-      this.inactivity?.tick();
-      if (this.inactivity?.state === 'warning') {
-        card.setSeconds(this.inactivity.secondsLeft());
-      }
-    }, 500);
-  }
-
-  /** A read-only view of the arena for tests and for diagnosing a stuck booth. */
-  exposeDiagnostics() {
-    Object.defineProperty(window, '__GLITCH_WORLD__', {
-      configurable: true,
-      value: () => {
-        const world = this.engine.world;
-
-        return {
-          phase: world.phase,
-          wave: world.wave,
-          paused: world.paused,
-          kills: world.kills,
-          player: {
-            x: world.player.x,
-            width: world.player.width,
-            weapon: world.player.weapon,
-            shield: world.player.shield,
-            hull: world.player.hull,
-          },
-          pickups: world.pickups.map((pickup) => ({ kind: pickup.kind, x: pickup.x, y: pickup.y })),
-          bossAlive: world.boss !== null,
-          enemiesAlive: world.enemies.filter((enemy) => enemy.alive).length,
-          enemyBullets: world.bullets.filter((bullet) => bullet.owner === 'enemy').length,
-        };
-      },
-    });
   }
 }

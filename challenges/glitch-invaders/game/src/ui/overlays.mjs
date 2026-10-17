@@ -1,5 +1,5 @@
 import { BUG_DEFINITIONS, BUG_ORDER } from '../bugs/bug-definitions.mjs';
-import { focusableElements, h, onClick, setText } from './dom.mjs';
+import { focusableElements, h, onClick } from './dom.mjs';
 
 /** The page regions that become inert behind a modal card. */
 const BACKGROUND_IDS = ['topbar', 'stage-wrap', 'dock'];
@@ -65,11 +65,6 @@ function card(title, label, ...children) {
 
 /** The briefing shown before play, or the welcome-back card after a refresh. */
 export function introCard(options) {
-  const modeNote =
-    options.mode === 'demo'
-      ? 'Demo mode: the diagnostics are realistic simulations.'
-      : 'Live mode: real errors and traces go to Sentry.';
-
   return card(
     options.returning ? 'Welcome back' : 'Incident briefing',
     'intro-title',
@@ -99,7 +94,7 @@ export function introCard(options) {
       h('li', {}, h('kbd', {}, 'Space'), ' fires'),
       h('li', {}, h('kbd', {}, 'P'), ' pauses'),
     ),
-    h('p', { class: 'muted' }, modeNote),
+    h('p', { class: 'muted' }, 'Demo mode: the diagnostics are realistic simulations.'),
     onClick(
       h(
         'button',
@@ -126,35 +121,6 @@ export function pauseCard(onResume) {
       onResume,
     ),
   );
-}
-
-/** The inactivity card, with a countdown the caller updates. */
-export function inactivityCard(onStay) {
-  const countdown = h('strong', { class: 'countdown' }, '30');
-  const element = card(
-    'Still there?',
-    'idle-title',
-    h(
-      'p',
-      { class: 'lede' },
-      'This run resets in ',
-      countdown,
-      ' s so the next person starts fresh.',
-    ),
-    onClick(
-      h(
-        'button',
-        { type: 'button', class: 'button button-primary button-large', 'data-autofocus': true },
-        'I’m here ▶',
-      ),
-      onStay,
-    ),
-  );
-
-  return {
-    element,
-    setSeconds: (seconds) => setText(countdown, String(seconds)),
-  };
 }
 
 /** The recap shown once all three incidents are closed. */

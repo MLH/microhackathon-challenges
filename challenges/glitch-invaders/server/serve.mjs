@@ -12,27 +12,24 @@ function report(message) {
   process.send?.(message, () => process.disconnect?.());
 }
 
-/** Read a required environment variable. */
-function requiredEnv(name) {
-  const value = process.env[name];
-  if (value === undefined || value === '') {
-    throw new Error(`${name} is not set`);
+/** The game directory the server serves, next to this file's `server/`. */
+const GAME_DIR = path.resolve(import.meta.dirname, '..', 'game');
+
+/** Read the arguments setup passes: the port, the runtime config file, and the progress file. */
+function readArguments(argv) {
+  const [portText, runtimeConfigFile, progressFile] = argv;
+  if (portText === undefined || runtimeConfigFile === undefined || progressFile === undefined) {
+    throw new Error('usage: serve.mjs <port> <runtime config file> <progress file>');
   }
 
-  return value;
+  return { port: Number(portText), runtimeConfigFile, progressFile };
 }
 
 /** Start serving. */
 function main() {
-  const port = Number(requiredEnv('GLITCH_PORT'));
-  const runtimeConfig = parseRuntimeConfig(
-    JSON.parse(readFileSync(requiredEnv('GLITCH_RUNTIME_CONFIG_FILE'), 'utf8')),
-  );
-  const server = createPageServer({
-    distDir: path.resolve(requiredEnv('GLITCH_DIST_DIR')),
-    progressFile: requiredEnv('GLITCH_PROGRESS_FILE'),
-    runtimeConfig,
-  });
+  const { port, runtimeConfigFile, progressFile } = readArguments(process.argv.slice(2));
+  const runtimeConfig = parseRuntimeConfig(JSON.parse(readFileSync(runtimeConfigFile, 'utf8')));
+  const server = createPageServer({ distDir: GAME_DIR, progressFile, runtimeConfig });
 
   server.once('error', (error) => {
     report({ listening: false, error: error.message });

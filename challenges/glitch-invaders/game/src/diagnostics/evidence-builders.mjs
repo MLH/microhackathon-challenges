@@ -29,7 +29,7 @@ export const WEAPON_STACK_FRAMES = [
     line: 160,
     inApp: true,
   },
-  { functionName: 'GameLoop.frame', file: 'game/src/app/app.mjs', line: 121, inApp: true },
+  { functionName: 'GameLoop.frame', file: 'game/src/app/app.mjs', line: 94, inApp: true },
   { functionName: 'requestAnimationFrame', file: '<browser>', line: 0, inApp: false },
 ];
 
@@ -107,8 +107,7 @@ export function evidenceTitle(encounter) {
 }
 
 /**
- * The sections for `encounter`. `breadcrumbs` is the trail to show for the shield failure; the
- * simulated provider passes its fixture and the live provider passes the recorded trail.
+ * The sections for `encounter`. `breadcrumbs` is the trail to show for the shield failure, and
  * `spans` is the waterfall to show for the boss stall.
  */
 export function evidenceSections(encounter, breadcrumbs, spans) {

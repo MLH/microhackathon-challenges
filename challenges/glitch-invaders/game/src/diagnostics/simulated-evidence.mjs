@@ -1,6 +1,6 @@
 /**
  * Demo-mode evidence: realistic and deterministic, built without any Sentry credentials. It is
- * clearly labelled simulated, and carries the same decisions as the live evidence.
+ * clearly labelled simulated.
  */
 
 import {
@@ -13,7 +13,7 @@ import {
 
 /** Produces fixed evidence, whatever the run measured. */
 export class SimulatedEvidenceProvider {
-  /** Evidence for `encounter`, labelled simulated and with no Sentry link. */
+  /** Evidence for `encounter`, labelled simulated. */
   async evidenceFor(encounter) {
     return {
       bug: encounter.bug,
@@ -21,7 +21,6 @@ export class SimulatedEvidenceProvider {
       title: evidenceTitle(encounter),
       referenceId: simulatedReference(encounter.bug),
       sections: evidenceSections(encounter, SIMULATED_SHIELD_BREADCRUMBS, SEQUENTIAL_BOSS_SPANS),
-      link: null,
     };
   }
 }
