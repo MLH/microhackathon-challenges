@@ -10,6 +10,18 @@ const SOURCE_BADGES = {
     label: 'DEMO · SIMULATED',
     note: 'Demo mode: realistic diagnostics, no Sentry account needed.',
   },
+  live: { label: 'LIVE SENTRY', note: 'Reported by the game and read back from Sentry.' },
+  fallback: {
+    label: 'SIMULATED · SENTRY UNAVAILABLE',
+    note: 'Sentry could not provide this report, so the console shows simulated evidence.',
+  },
+};
+
+/** How the evidence banner tells the participant to read each kind of evidence. */
+const HERO_COPY = {
+  simulated:
+    'Demo mode (Sentry not connected): inspect the simulated telemetry snapshot to identify the root cause.',
+  live: 'Live from Sentry: this is what Sentry recorded for the failure you just hit. Find the root cause.',
 };
 
 /** The glyphs for breadcrumb levels; level is never color alone. */
@@ -179,7 +191,7 @@ export class IncidentConsole {
     }
   }
 
-  /** Evidence step: the simulated Sentry capture of the failure. */
+  /** Evidence step: Sentry's record of the failure, or the simulated capture of it. */
   evidencePane() {
     const evidence = this.evidence;
     if (evidence === null) {
@@ -225,8 +237,26 @@ export class IncidentConsole {
     );
   }
 
-  /** Banner with the exception or trace headline and how to read the capture. */
+  /**
+   * Banner with the exception or trace headline and how to read the capture: a fallback says why
+   * Sentry's record is missing, and live evidence links to it in Sentry.
+   */
   sentryHero(evidence) {
+    const copy = evidence.source === 'fallback' ? evidence.note : HERO_COPY[evidence.source];
+    const link = evidence.link?.url.startsWith('https://')
+      ? h(
+          'a',
+          {
+            class: 'button button-sentry',
+            href: evidence.link.url,
+            target: '_blank',
+            rel: 'noopener noreferrer',
+            'data-key': 'open-sentry',
+          },
+          `${evidence.link.label} ↗`,
+        )
+      : null;
+
     return h(
       'div',
       { class: 'sentry-callout' },
@@ -236,10 +266,14 @@ export class IncidentConsole {
         h('p', { class: 'evidence-head' }, evidence.title),
         h(
           'p',
-          { class: 'sentry-callout-copy' },
-          'Demo mode (Sentry not connected): inspect the simulated telemetry snapshot to identify the root cause.',
+          {
+            class: 'sentry-callout-copy',
+            role: evidence.source === 'fallback' ? 'status' : undefined,
+          },
+          copy,
         ),
       ),
+      link,
     );
   }
 

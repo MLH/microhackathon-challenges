@@ -151,6 +151,11 @@ body {
   white-space: nowrap;
 }
 
+.badge[data-mode="live"] {
+  border-color: var(--success);
+  color: var(--success);
+}
+
 .topbar-reset {
   padding: 3px 10px;
   border: 1px solid var(--border);
@@ -668,6 +673,16 @@ kbd {
   color: var(--mlh-yellow);
 }
 
+.source-badge[data-source="live"] {
+  border-color: var(--success);
+  color: var(--success);
+}
+
+.source-badge[data-source="fallback"] {
+  border-color: var(--warning);
+  color: var(--warning);
+}
+
 .sentry-callout {
   display: flex;
   flex-direction: column;
@@ -695,6 +710,25 @@ kbd {
 .sentry-callout-copy {
   color: var(--muted);
   font: 13px / 1.35 var(--sans);
+}
+
+.button-sentry {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-color: var(--mlh-yellow);
+  border-radius: 6px;
+  background: var(--mlh-blue);
+  color: #ffffff;
+  font: 700 13px var(--sans);
+  text-decoration: none;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.button-sentry:hover {
+  border-color: #ffffff;
 }
 
 .context-pills {

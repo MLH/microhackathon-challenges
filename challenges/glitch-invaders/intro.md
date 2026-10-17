@@ -8,8 +8,10 @@ Three things will fail while you play:
 - a boss that takes forever to spawn
 
 Each failure opens an Incident Console that shows the Sentry evidence: a
-stack trace, breadcrumbs, or a performance trace. Read it, find the root
-cause, choose the right patch, and watch the fix work in the game.
+stack trace, breadcrumbs, or a performance trace. When this booth is
+connected to Sentry, it is Sentry's live record of your run; otherwise it is
+a realistic simulation. Read it, find the root cause, choose the right patch,
+and watch the fix work in the game.
 
 Your guide, Pi, is on the right. Ask it for a nudge any time. It won't
 hand you the answers.

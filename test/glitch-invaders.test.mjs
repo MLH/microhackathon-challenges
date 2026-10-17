@@ -2,13 +2,16 @@
 // through gameplay and verify their repairs in play; stack frames match the
 // real source lines; the IncidentTracker enforces stage progression; the page
 // server serves native .mjs modules under a strict CSP, enforces origin, host,
-// size, and path checks, and refuses a planted progress file; and the setup and
-// cleanup hooks start and stop the server cleanly, including after failures.
+// size, and path checks, and refuses a planted progress file; the setup and
+// cleanup hooks start and stop the server cleanly, including after failures; and
+// live Sentry mode turns on only with a token and filled-in settings, reads
+// evidence from a local stand-in for the Sentry API without ever exposing the
+// token, and falls back to labelled simulated evidence when Sentry fails.
 
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, request } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
@@ -30,6 +33,10 @@ import {
   IncidentTracker,
 } from '../challenges/glitch-invaders/game/src/bugs/incident-tracker.mjs';
 import { WEAPON_STACK_FRAMES } from '../challenges/glitch-invaders/game/src/diagnostics/evidence-builders.mjs';
+import {
+  FALLBACK_NOTES,
+  LiveEvidenceProvider,
+} from '../challenges/glitch-invaders/game/src/diagnostics/live-evidence.mjs';
 import { SimulatedEvidenceProvider } from '../challenges/glitch-invaders/game/src/diagnostics/simulated-evidence.mjs';
 import {
   BOSS_SPAWN_BUDGET_MS,
@@ -41,9 +48,11 @@ import {
 import { GameEngine } from '../challenges/glitch-invaders/game/src/engine/game-engine.mjs';
 import { createRandom } from '../challenges/glitch-invaders/game/src/engine/random.mjs';
 import { idleInput } from '../challenges/glitch-invaders/game/src/engine/world.mjs';
+import { SentryReporter } from '../challenges/glitch-invaders/game/src/sentry/reporter.mjs';
 import { WeaponConfigError } from '../challenges/glitch-invaders/game/src/weapons/weapons.mjs';
 import { runCleanup } from '../challenges/glitch-invaders/server/cleanup.mjs';
 import { resolveStatePaths } from '../challenges/glitch-invaders/server/paths.mjs';
+import { SentryApi } from '../challenges/glitch-invaders/server/sentry-api.mjs';
 import { runSetup } from '../challenges/glitch-invaders/server/setup.mjs';
 import { BUG_IDS, createProgress, monitorStateLine } from '../challenges/glitch-invaders/shared/progress.mjs';
 
@@ -54,6 +63,11 @@ const FRAME_MS = 16;
 const SERVER_EXIT_TIMEOUT_MS = 5_000;
 const CONTENT_SECURITY_POLICY =
   "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'";
+const SENTRY_TOKEN = 'sntrys_stand-in-token-that-must-never-show';
+const LIVE_DSN = 'https://publickey@o1.ingest.us.sentry.io/42';
+const WEAPON_EVENT_ID = 'a'.repeat(32);
+const SHIELD_EVENT_ID = 'b'.repeat(32);
+const BOSS_TRACE_ID = 'c'.repeat(32);
 
 /** Fake time for the boss loader, which needs `now` and `sleep`. */
 class VirtualClock {
@@ -337,6 +351,230 @@ function putProgressTo(url, body, headers = {}) {
     headers: { 'content-type': 'application/json', ...headers },
     body,
   });
+}
+
+/** A Sentry API error event as the events endpoint returns it; `overrides` replace fields. */
+function sentryEventFactory(overrides = {}) {
+  return {
+    eventID: WEAPON_EVENT_ID,
+    groupID: '7001',
+    title: 'WeaponConfigError: Configuration missing for weapon: fanout',
+    contexts: {
+      weapon_state: { attemptedWeapon: 'fanout', availableWeapons: ['single'], type: 'default' },
+    },
+    entries: [
+      {
+        type: 'exception',
+        data: {
+          values: [
+            {
+              type: 'WeaponConfigError',
+              value: 'Configuration missing for weapon: fanout',
+              stacktrace: {
+                frames: [
+                  { function: 'GameEngine.tryFire', filename: 'game/src/engine/game-engine.mjs', lineNo: 320, inApp: true },
+                  { function: 'fireWeapon', filename: 'game/src/weapons/weapons.mjs', lineNo: 46, inApp: true },
+                ],
+              },
+            },
+          ],
+        },
+      },
+    ],
+    ...overrides,
+  };
+}
+
+/** A Sentry API issue; `overrides` replace fields. */
+function sentryIssueFactory(overrides = {}) {
+  return {
+    id: '7001',
+    shortId: 'GLITCH-INVADERS-1',
+    title: 'WeaponConfigError: Configuration missing for weapon: fanout',
+    permalink: 'https://mlh.sentry.io/issues/7001/',
+    ...overrides,
+  };
+}
+
+/** The shield event: an exception, its breadcrumb trail, and the shield context. */
+function shieldEventFactory() {
+  return sentryEventFactory({
+    eventID: SHIELD_EVENT_ID,
+    groupID: '7002',
+    contexts: { shield_state: { shieldActive: true, actualDamage: 3, type: 'default' } },
+    entries: [
+      {
+        type: 'exception',
+        data: { values: [{ type: 'GameLogicError', value: 'Shield was active but 3 damage was applied' }] },
+      },
+      {
+        type: 'breadcrumbs',
+        data: {
+          values: [
+            { timestamp: '2026-10-17T12:00:00.000Z', category: 'game.shield', message: 'Shield enabled', level: 'info', data: { shieldActive: 'true' } },
+            { timestamp: '2026-10-17T12:00:05.600Z', category: 'game.combat', message: 'Actual damage applied: 3', level: 'warning', data: { actualDamage: '3' } },
+            { timestamp: '2026-10-17T12:00:06.800Z', category: 'game.combat', message: 'Ship destroyed: shield failed to protect', level: 'fatal' },
+          ],
+        },
+      },
+    ],
+  });
+}
+
+/** The spans endpoint rows for the boss trace: two sequential loads of 1.2 s and 1.0 s. */
+function bossSpanRows() {
+  return [
+    { 'span.description': 'loadTextures', 'span.op': 'game.resource.load', 'span.duration': 1200, 'precise.start_ts': 1_000 },
+    { 'span.description': 'loadSounds', 'span.op': 'game.resource.load', 'span.duration': 1000, 'precise.start_ts': 1_001.2 },
+  ];
+}
+
+/**
+ * Start a local stand-in for the Sentry API that answers the routes the page server calls from
+ * `routes` (pathname to body, or a status number), records each request, and closes when the test
+ * ends. `outage` makes every route answer 503, and `unindexedRequests` makes that many first
+ * requests answer 404, as Sentry does before it has indexed a report.
+ */
+function startSentryStandIn(testContext, options = {}) {
+  const routes = {
+    '/api/0/projects/mlh/glitch-invaders/events/': { data: [] },
+    [`/api/0/projects/mlh/glitch-invaders/events/${WEAPON_EVENT_ID}/`]: sentryEventFactory(),
+    [`/api/0/projects/mlh/glitch-invaders/events/${SHIELD_EVENT_ID}/`]: shieldEventFactory(),
+    '/api/0/organizations/mlh/issues/7001/': sentryIssueFactory(),
+    '/api/0/organizations/mlh/issues/7002/': sentryIssueFactory({ shortId: 'GLITCH-INVADERS-2', title: 'GameLogicError: Shield was active' }),
+    '/api/0/organizations/mlh/events/': { data: bossSpanRows() },
+    ...options.routes,
+  };
+  const requests = [];
+
+  return new Promise((resolve, reject) => {
+    const server = createHttpServer((incoming, response) => {
+      const url = new URL(incoming.url ?? '/', 'http://localhost');
+      requests.push({ method: incoming.method, url, authorization: incoming.headers.authorization });
+      const unindexed = requests.length <= (options.unindexedRequests ?? 0);
+      const route = options.outage ? 503 : unindexed ? 404 : (routes[url.pathname] ?? 404);
+      if (typeof route === 'number') {
+        response.writeHead(route).end('{"detail":"stand-in refusal"}');
+
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(route));
+    });
+    testContext.after(
+      () =>
+        new Promise((done) => {
+          server.close(done);
+          server.closeAllConnections();
+        }),
+    );
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      resolve({ url: `http://127.0.0.1:${server.address().port}`, requests });
+    });
+  });
+}
+
+/** Run `hook` from the package at `packageDir` and resolve with its exit code and output. */
+function runPackageHook(packageDir, hook, env) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(path.join(packageDir, hook), [], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (chunk) => {
+      output += chunk;
+    });
+    child.stderr.on('data', (chunk) => {
+      output += chunk;
+    });
+    child.once('error', reject);
+    child.once('close', (code) => resolve({ code, output }));
+  });
+}
+
+/**
+ * Copy the package and fill in its `sentry.json` with live settings pointing at `apiUrl`, so the
+ * shipped hooks run against the stand-in. Resolves with the copy's directory, which
+ * {@link startLivePackage} removes once its cleanup hook has run.
+ */
+async function makeLivePackage(apiUrl) {
+  const copyRoot = await mkdtemp(path.join(os.tmpdir(), 'glitch-package-'));
+  const packageDir = path.join(copyRoot, 'glitch-invaders');
+  await cp(packageDirectory, packageDir, { recursive: true });
+  const settings = { dsn: LIVE_DSN, org: 'mlh', project: 'glitch-invaders', apiUrl };
+  await writeFile(path.join(packageDir, 'sentry.json'), `${JSON.stringify(settings)}\n`);
+
+  return packageDir;
+}
+
+/**
+ * Run the live package's setup hook in a fresh workspace with `extraEnv`, registering its cleanup
+ * hook. Resolves with the server's base URL, the hook's output, and the workspace.
+ */
+async function startLivePackage(testContext, packageDir, extraEnv) {
+  const workspace = await mkdtemp(path.join(os.tmpdir(), 'glitch-live-'));
+  const port = await freePort();
+  const env = { ...hookEnvironment(workspace, port), ...extraEnv };
+  testContext.after(async () => {
+    await runPackageHook(packageDir, 'cleanup', env);
+    await rm(workspace, { recursive: true, force: true });
+    await rm(path.dirname(packageDir), { recursive: true, force: true });
+  });
+
+  const setup = await runPackageHook(packageDir, 'setup', env);
+  assert.equal(setup.code, 0, setup.output);
+
+  return { base: `http://127.0.0.1:${port}`, output: setup.output, workspace };
+}
+
+/** Start a live stack: a Sentry stand-in, a live package copy, and its server with the token. */
+async function startLiveStack(testContext, standInOptions = {}) {
+  const standIn = await startSentryStandIn(testContext, standInOptions);
+  const packageDir = await makeLivePackage(standIn.url);
+  const stack = await startLivePackage(testContext, packageDir, { SENTRY_AUTH_TOKEN: SENTRY_TOKEN });
+
+  return { ...stack, standIn };
+}
+
+/** Ask the page server at `base` for the live evidence of report `id` of `bug`. */
+function fetchEvidence(base, bug, id) {
+  return fetch(`${base}/api/sentry-evidence?bug=${bug}&id=${id}`);
+}
+
+/** A reporter fake for the page's live provider: it records reports and answers with `outcome`. */
+function fakeReporter(outcome) {
+  const reported = [];
+
+  return {
+    reported,
+    report: async (encounter) => {
+      reported.push(encounter);
+
+      return outcome;
+    },
+  };
+}
+
+/** A fetch fake that answers every request with `response`, recording the URLs asked for. */
+function fakeFetch(response) {
+  const urls = [];
+  const fetchImpl = async (url) => {
+    urls.push(String(url));
+
+    return response;
+  };
+
+  return { urls, fetchImpl };
+}
+
+/** The weapon encounter the engine reports when the fan-out upgrade jams. */
+function weaponEncounterFactory() {
+  return {
+    bug: 'weapon',
+    jam: {
+      weaponId: 'fanout',
+      availableWeapons: ['single'],
+      error: new Error('Configuration missing for weapon: fanout'),
+    },
+  };
 }
 
 test('weapon stack trace frames point at the real lines of the calls they name', () => {
@@ -947,4 +1185,255 @@ test('setup and cleanup run standalone from the current directory with no BOOTHS
   assert.equal(alive(pid), false);
   assert.equal(await isRefused(port), true);
   assert.equal(existsSync(path.join(workspace, '.glitch')), false);
+});
+
+test('the package names the gemini and sentry vault services and ships placeholder Sentry settings', async () => {
+  const manifest = JSON.parse(await readFile(path.join(packageDirectory, 'challenge.json'), 'utf8'));
+  const settings = JSON.parse(await readFile(path.join(packageDirectory, 'sentry.json'), 'utf8'));
+
+  assert.deepEqual(manifest.vault_services, ['gemini', 'sentry']);
+  for (const key of ['dsn', 'org', 'project']) {
+    assert.match(settings[key], /^<.+>$/, `${key} is not a placeholder`);
+  }
+});
+
+test('setup stays in demo mode with SENTRY_AUTH_TOKEN set while sentry.json holds placeholders', async (testContext) => {
+  const stack = await startStack(testContext, { SENTRY_AUTH_TOKEN: SENTRY_TOKEN });
+
+  const config = await (await fetch(`${stack.url}runtime-config.json`)).json();
+  const page = await getRaw(stack.url, '/');
+  const evidence = await fetchEvidence(stack.url.replace(/\/$/, ''), 'weapon', WEAPON_EVENT_ID);
+
+  assert.deepEqual(config, { attemptId: stack.attemptId });
+  assert.equal(stack.live, false);
+  assert.equal(stack.note, null);
+  assert.equal(page.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
+  assert.equal(evidence.status, 404);
+});
+
+test('setup notes that live mode is off when sentry.json is filled in but SENTRY_AUTH_TOKEN is unset', async (testContext) => {
+  const standIn = await startSentryStandIn(testContext);
+  const packageDir = await makeLivePackage(standIn.url);
+
+  const stack = await startLivePackage(testContext, packageDir, {});
+
+  const config = await (await fetch(`${stack.base}/runtime-config.json`)).json();
+  assert.match(stack.output, /^Glitch Invaders is ready at http:\/\/127\.0\.0\.1:\d+\/\n/);
+  assert.match(stack.output, /note: live Sentry mode is off: SENTRY_AUTH_TOKEN is not set/);
+  assert.deepEqual(Object.keys(config), ['attemptId']);
+  assert.equal(standIn.requests.length, 0);
+});
+
+test('live mode fetches the weapon issue from the Sentry API with the token and returns its stack trace', async (testContext) => {
+  const stack = await startLiveStack(testContext);
+
+  const response = await fetchEvidence(stack.base, 'weapon', WEAPON_EVENT_ID);
+
+  assert.equal(response.status, 200);
+  const evidence = await response.json();
+  assert.equal(evidence.source, 'live');
+  assert.equal(evidence.referenceId, 'GLITCH-INVADERS-1');
+  assert.deepEqual(evidence.link, { label: 'Open the issue in Sentry', url: 'https://mlh.sentry.io/issues/7001/' });
+  const frames = evidence.sections.find((section) => section.kind === 'stacktrace').frames;
+  assert.deepEqual(
+    frames.map((frame) => `${frame.functionName} ${frame.file}:${frame.line}`),
+    ['fireWeapon game/src/weapons/weapons.mjs:46', 'GameEngine.tryFire game/src/engine/game-engine.mjs:320'],
+  );
+  const context = evidence.sections.find((section) => section.kind === 'context');
+  assert.deepEqual(context.entries, { attemptedWeapon: 'fanout', availableWeapons: 'single' });
+  assert.deepEqual(
+    stack.standIn.requests.map((request) => [request.url.pathname, request.authorization]),
+    [
+      [`/api/0/projects/mlh/glitch-invaders/events/${WEAPON_EVENT_ID}/`, `Bearer ${SENTRY_TOKEN}`],
+      ['/api/0/organizations/mlh/issues/7001/', `Bearer ${SENTRY_TOKEN}`],
+    ],
+  );
+});
+
+test('live mode returns the shield breadcrumbs timed from the last one', async (testContext) => {
+  const stack = await startLiveStack(testContext);
+
+  const evidence = await (await fetchEvidence(stack.base, 'shield', SHIELD_EVENT_ID)).json();
+
+  const crumbs = evidence.sections.find((section) => section.kind === 'breadcrumbs').entries;
+  assert.deepEqual(
+    crumbs.map((crumb) => [crumb.offsetLabel, crumb.level, crumb.message]),
+    [
+      ['-6.8 s', 'info', 'Shield enabled'],
+      ['-1.2 s', 'warning', 'Actual damage applied: 3'],
+      ['0.0 s', 'error', 'Ship destroyed: shield failed to protect'],
+    ],
+  );
+  assert.equal(evidence.referenceId, 'GLITCH-INVADERS-2');
+});
+
+test('live mode returns the boss trace as a waterfall from the spans Sentry indexed', async (testContext) => {
+  const stack = await startLiveStack(testContext);
+
+  const evidence = await (await fetchEvidence(stack.base, 'boss', BOSS_TRACE_ID)).json();
+
+  const waterfall = evidence.sections.find((section) => section.kind === 'waterfall');
+  assert.deepEqual(
+    waterfall.spans.map((span) => [span.name, span.startMs, span.durationMs]),
+    [
+      ['loadTextures', 0, 1200],
+      ['loadSounds', 1200, 1000],
+    ],
+  );
+  assert.equal(waterfall.totalMs, 2200);
+  assert.equal(evidence.link.url, `https://mlh.sentry.io/explore/traces/trace/${BOSS_TRACE_ID}/`);
+  const query = stack.standIn.requests[0].url.searchParams;
+  assert.equal(query.get('dataset'), 'spans');
+  assert.equal(query.get('query'), `trace:${BOSS_TRACE_ID} span.op:game.resource.load`);
+});
+
+test('live mode lets the page reach the DSN ingest origin and no other', async (testContext) => {
+  const stack = await startLiveStack(testContext);
+
+  const page = await getRaw(`${stack.base}/`, '/');
+
+  assert.equal(
+    page.headers['content-security-policy'],
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self' https://o1.ingest.us.sentry.io",
+  );
+});
+
+test('the token never appears in a response, a page asset, the workspace, or hook output', async (testContext) => {
+  const stack = await startLiveStack(testContext);
+  const outage = await startLiveStack(testContext, { outage: true });
+
+  const bodies = await Promise.all(
+    [
+      `${stack.base}/`,
+      `${stack.base}/src/main.mjs`,
+      `${stack.base}/src/sentry/reporter.mjs`,
+      `${stack.base}/runtime-config.json`,
+      `${stack.base}/api/sentry-evidence?bug=weapon&id=${WEAPON_EVENT_ID}`,
+      `${stack.base}/api/sentry-evidence?bug=boss&id=not-an-id`,
+      `${outage.base}/api/sentry-evidence?bug=shield&id=${SHIELD_EVENT_ID}`,
+    ].map(async (url) => {
+      const response = await fetch(url);
+
+      return `${JSON.stringify([...response.headers])}${await response.text()}`;
+    }),
+  );
+  const workspaceFiles = await readdir(stack.workspace, { recursive: true, withFileTypes: true });
+  const stored = await Promise.all(
+    workspaceFiles
+      .filter((entry) => entry.isFile())
+      .map((entry) => readFile(path.join(entry.parentPath, entry.name), 'utf8')),
+  );
+
+  for (const text of [...bodies, ...stored, stack.output, outage.output]) {
+    assert.ok(!text.includes(SENTRY_TOKEN), `the token leaked into: ${text.slice(0, 200)}`);
+  }
+  assert.match(stack.output, /\(live Sentry mode\)/);
+});
+
+test('a Sentry outage answers 502 naming the failed request, without retrying', async (testContext) => {
+  const stack = await startLiveStack(testContext, { outage: true });
+
+  const response = await fetchEvidence(stack.base, 'weapon', WEAPON_EVENT_ID);
+
+  assert.equal(response.status, 502);
+  assert.equal(
+    await response.text(),
+    `Sentry answered /api/0/projects/mlh/glitch-invaders/events/${WEAPON_EVENT_ID}/ with 503`,
+  );
+  assert.equal(stack.standIn.requests.length, 1);
+});
+
+test('SentryApi waits while Sentry is still indexing an event, then returns it', async (testContext) => {
+  const standIn = await startSentryStandIn(testContext, { unindexedRequests: 2 });
+  const waits = [];
+  const api = new SentryApi({
+    apiUrl: standIn.url,
+    org: 'mlh',
+    project: 'glitch-invaders',
+    token: SENTRY_TOKEN,
+    retryDelaysMs: [1_000, 2_000, 3_000],
+    sleep: async (milliseconds) => {
+      waits.push(milliseconds);
+    },
+  });
+
+  const event = await api.event(WEAPON_EVENT_ID);
+
+  assert.equal(event.eventID, WEAPON_EVENT_ID);
+  assert.deepEqual(waits, [1_000, 2_000]);
+  assert.equal(standIn.requests.length, 3);
+});
+
+test('SentryApi gives up as unavailable once Sentry never indexes the report', async (testContext) => {
+  const standIn = await startSentryStandIn(testContext, { unindexedRequests: 10 });
+  const api = new SentryApi({
+    apiUrl: standIn.url,
+    org: 'mlh',
+    project: 'glitch-invaders',
+    token: SENTRY_TOKEN,
+    retryDelaysMs: [1_000, 2_000],
+    sleep: async () => {},
+  });
+
+  await assert.rejects(api.traceSpans(BOSS_TRACE_ID), {
+    name: 'SentryUnavailableError',
+    message: 'Sentry has not indexed the report yet',
+  });
+  assert.equal(standIn.requests.length, 3);
+});
+
+test('the live provider falls back to simulated evidence with a visible note when Sentry fails', async () => {
+  const reporter = fakeReporter({ id: WEAPON_EVENT_ID, delivered: true });
+  const server = fakeFetch(new Response('Sentry answered with 503', { status: 502 }));
+  const provider = new LiveEvidenceProvider({
+    reporter,
+    simulated: new SimulatedEvidenceProvider(),
+    fetchImpl: server.fetchImpl,
+  });
+
+  const evidence = await provider.evidenceFor(weaponEncounterFactory());
+
+  assert.equal(evidence.source, 'fallback');
+  assert.equal(evidence.note, FALLBACK_NOTES.unavailable);
+  assert.ok(evidence.sections.some((section) => section.kind === 'stacktrace'));
+  assert.deepEqual(server.urls, [`/api/sentry-evidence?bug=weapon&id=${WEAPON_EVENT_ID}`]);
+});
+
+test('the live provider falls back without asking the server when Sentry refused the report', async () => {
+  const server = fakeFetch(new Response('{}'));
+  const provider = new LiveEvidenceProvider({
+    reporter: fakeReporter({ id: WEAPON_EVENT_ID, delivered: false }),
+    simulated: new SimulatedEvidenceProvider(),
+    fetchImpl: server.fetchImpl,
+  });
+
+  const evidence = await provider.evidenceFor(weaponEncounterFactory());
+
+  assert.equal(evidence.source, 'fallback');
+  assert.equal(evidence.note, FALLBACK_NOTES.unsent);
+  assert.deepEqual(server.urls, []);
+});
+
+test('SentryReporter posts one tagged error event per bug to the DSN envelope endpoint', async () => {
+  const ingest = [];
+  const reporter = new SentryReporter({ dsn: LIVE_DSN }, 'attempt-1', async (url, init) => {
+    ingest.push({ url, body: init.body });
+
+    return new Response('{}');
+  });
+  reporter.add({ category: 'game.weapon', message: 'Firing weapon: fanout' });
+
+  const first = await reporter.report(weaponEncounterFactory());
+  const repeat = await reporter.report(weaponEncounterFactory());
+
+  assert.deepEqual(repeat, first);
+  assert.equal(first.delivered, true);
+  assert.equal(ingest.length, 1);
+  assert.match(ingest[0].url, /^https:\/\/o1\.ingest\.us\.sentry\.io\/api\/42\/envelope\/\?.*sentry_key=publickey/);
+  const [header, item, payload] = ingest[0].body.trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(header.event_id, first.id);
+  assert.equal(item.type, 'event');
+  assert.deepEqual(payload.tags, { run_id: 'attempt-1', bug: 'weapon' });
+  assert.equal(payload.exception.values[0].stacktrace.frames.at(-1).function, 'fireWeapon');
+  assert.equal(payload.breadcrumbs[0].message, 'Firing weapon: fanout');
 });

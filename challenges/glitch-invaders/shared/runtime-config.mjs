@@ -1,7 +1,11 @@
 /**
  * The attempt's runtime config: setup writes it, the page server serves it as
- * `/runtime-config.json`, and the page reads it to tie saved progress to this attempt.
+ * `/runtime-config.json`, and the page reads it to tie saved progress to this attempt. A live
+ * attempt also carries the public Sentry settings; demo has none. No secret is ever in it.
  */
+
+/** The Sentry API the vault injects the token for, unless the package config names another. */
+export const DEFAULT_SENTRY_API_URL = 'https://sentry.io';
 
 /** Thrown when a served or stored runtime config is malformed. */
 export class InvalidRuntimeConfigError extends Error {
@@ -11,11 +15,78 @@ export class InvalidRuntimeConfigError extends Error {
   }
 }
 
+/** Whether `dsn` looks like `https://<public key>@<ingest host>/<project id>`. */
+function isDsn(dsn) {
+  const url = URL.parse(dsn);
+
+  return (
+    url !== null &&
+    url.protocol === 'https:' &&
+    url.username !== '' &&
+    url.password === '' &&
+    /^\/\d+$/.test(url.pathname)
+  );
+}
+
+/** Whether `value` is a Sentry organization or project slug. */
+function isSlug(value) {
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/.test(value);
+}
+
+/** Whether `apiUrl` is an HTTPS origin, or a plain-HTTP loopback one such as a local stand-in. */
+function isApiOrigin(apiUrl) {
+  const url = URL.parse(apiUrl);
+  if (url === null || url.origin !== apiUrl) {
+    return false;
+  }
+
+  return (
+    url.protocol === 'https:' ||
+    (url.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(url.hostname))
+  );
+}
+
+/**
+ * Validate untrusted JSON as the public Sentry settings, with `apiUrl` defaulting to
+ * {@link DEFAULT_SENTRY_API_URL}.
+ *
+ * @returns {{ dsn: string, org: string, project: string, apiUrl: string }}
+ * @throws {InvalidRuntimeConfigError} naming the first field that is missing or malformed.
+ */
+export function parseSentrySettings(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new InvalidRuntimeConfigError('sentry must be an object');
+  }
+
+  const { dsn, org, project, apiUrl = DEFAULT_SENTRY_API_URL } = value;
+  if (typeof dsn !== 'string' || !isDsn(dsn)) {
+    throw new InvalidRuntimeConfigError('sentry.dsn must be a Sentry DSN');
+  }
+  if (typeof org !== 'string' || !isSlug(org)) {
+    throw new InvalidRuntimeConfigError('sentry.org must be a Sentry slug');
+  }
+  if (typeof project !== 'string' || !isSlug(project)) {
+    throw new InvalidRuntimeConfigError('sentry.project must be a Sentry slug');
+  }
+  if (typeof apiUrl !== 'string' || !isApiOrigin(apiUrl)) {
+    throw new InvalidRuntimeConfigError('sentry.apiUrl must be an HTTPS origin');
+  }
+
+  return { dsn, org, project, apiUrl };
+}
+
+/** The origin the page sends Sentry envelopes to, which the page's CSP must allow. */
+export function ingestOrigin(dsn) {
+  return new URL(dsn).origin;
+}
+
 /**
  * Validate untrusted JSON as a runtime config.
  *
- * @returns {{ attemptId: string }}
- * @throws {InvalidRuntimeConfigError} when it is not an object or `attemptId` is malformed.
+ * @returns {{ attemptId: string, sentry?: ReturnType<typeof parseSentrySettings> }} with `sentry`
+ *   only in live mode.
+ * @throws {InvalidRuntimeConfigError} when it is not an object, `attemptId` is malformed, or
+ *   `sentry` is present but malformed.
  */
 export function parseRuntimeConfig(value) {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
@@ -28,6 +99,9 @@ export function parseRuntimeConfig(value) {
       'attemptId must be 4 to 64 lowercase letters, digits, or hyphens',
     );
   }
+  if (value.sentry === undefined) {
+    return { attemptId };
+  }
 
-  return { attemptId };
+  return { attemptId, sentry: parseSentrySettings(value.sentry) };
 }

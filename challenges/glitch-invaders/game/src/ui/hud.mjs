@@ -27,10 +27,18 @@ export class Hud {
   shield = requireElement('stat-shield');
   kills = requireElement('stat-kills');
   score = requireElement('stat-score');
+  badge = requireElement('mode-badge');
   objectiveText = requireElement('objective-text');
   objectiveDetail = requireElement('objective-detail');
   incidents = requireElement('incidents');
   chipSignature = '';
+
+  /** Swap the page's demo badge for the live one; it never changes during a run. */
+  showLiveMode() {
+    this.badge.dataset.mode = 'live';
+    setText(this.badge, 'LIVE · Sentry');
+    this.badge.title = 'Live mode: the failures are reported to Sentry and the evidence is its record.';
+  }
 
   /** Refresh every stat from the latest world and progress. */
   update(progress, world) {
