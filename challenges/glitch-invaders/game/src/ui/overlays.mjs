@@ -63,7 +63,10 @@ function card(title, label, ...children) {
   );
 }
 
-/** The briefing shown before play, or the welcome-back card after a refresh. */
+/**
+ * The briefing shown before play, or the welcome-back card after a refresh; `options.live` says
+ * whether the evidence comes from Sentry.
+ */
 export function introCard(options) {
   return card(
     options.returning ? 'Welcome back' : 'Incident briefing',
@@ -94,7 +97,13 @@ export function introCard(options) {
       h('li', {}, h('kbd', {}, 'Space'), ' fires'),
       h('li', {}, h('kbd', {}, 'P'), ' pauses'),
     ),
-    h('p', { class: 'muted' }, 'Demo mode: the diagnostics are realistic simulations.'),
+    h(
+      'p',
+      { class: 'muted' },
+      options.live
+        ? 'Live mode: the failures are reported to Sentry, and the console shows its record.'
+        : 'Demo mode: the diagnostics are realistic simulations.',
+    ),
     onClick(
       h(
         'button',

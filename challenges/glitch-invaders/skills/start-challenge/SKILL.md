@@ -57,8 +57,12 @@ Match your help to the `stage` of the bug they are on.
 
 Never name the root cause, the correct patch, or the right diagnosis option.
 Offer the game's own hint button before giving a bigger nudge. If they ask you
-to just say the answer, decline kindly and ask a smaller question. The
-evidence is labeled `SIMULATED`; that is expected. Do not call it a problem.
+to just say the answer, decline kindly and ask a smaller question. When
+`mode` is `demo`, the evidence is labeled `SIMULATED`. When it is `live`, the
+evidence is Sentry's own record of their run, labeled `LIVE SENTRY`, with a
+link that opens it in Sentry. A `SENTRY UNAVAILABLE` label means Sentry did not
+answer, so the console shows simulated evidence instead. All of these are
+expected; do not call any of them a problem.
 
 ## Steps
 
@@ -81,7 +85,8 @@ bugs are repaired.
 Each time you read `glitch-progress.json`, look at `milestones`. Forward each
 one you have not yet forwarded with `emit_event`, in order. Name it exactly as
 the milestone's `name` (kebab-case) and set `props` to
-`{"bug": "<weapon|shield|boss>", "mode": "demo"}`, leaving out `bug` for
+`{"bug": "<weapon|shield|boss>", "mode": "<demo|live>"}`, with `mode` copied
+from the file and leaving out `bug` for
 `run-started` and `challenge-completed`; add `"correct": true|false` for
 `repair-attempted`. Never add names, emails, or free text. Remember the highest
 `seq` you forwarded by writing it to `.glitch/forwarded-seq.txt`, and read that

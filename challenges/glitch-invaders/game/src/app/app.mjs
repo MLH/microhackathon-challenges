@@ -4,10 +4,12 @@ import { loadBossResources } from '../boss/boss-loader.mjs';
 import { BUG_DEFINITIONS } from '../bugs/bug-definitions.mjs';
 import { tryRepair } from '../bugs/code-state.mjs';
 import { IncidentTracker } from '../bugs/incident-tracker.mjs';
+import { LiveEvidenceProvider } from '../diagnostics/live-evidence.mjs';
 import { SimulatedEvidenceProvider } from '../diagnostics/simulated-evidence.mjs';
 import { GameEngine } from '../engine/game-engine.mjs';
 import { createRandom } from '../engine/random.mjs';
 import { CanvasRenderer } from '../render/canvas-renderer.mjs';
+import { attachBreadcrumbs } from '../sentry/breadcrumbs.mjs';
 import { publishState } from '../session/monitor-state.mjs';
 
 import { BossLoadingView } from '../ui/boss-loading.mjs';
@@ -49,7 +51,8 @@ export class GameApp {
   overlays = new OverlayHost(requireElement('overlay-root'));
   bossView = new BossLoadingView(requireElement('boss-loading'));
   engine;
-  evidence = new SimulatedEvidenceProvider();
+  simulated = new SimulatedEvidenceProvider();
+  live = null;
   incidentConsole;
   input;
   loop;
@@ -62,10 +65,16 @@ export class GameApp {
   pauseOpen = false;
   pendingStart = null;
 
+  /**
+   * @param {object} options the page's config, store, and hooks; `reporter` is given only in live
+   *   mode and sends the failures to Sentry.
+   * @param {object | null} saved the run to resume, if any.
+   */
   constructor(options, saved) {
     this.options = options;
     this.now = options.now ?? (() => performance.now());
-    this.progress = saved ?? createProgress(options.config.attemptId);
+    const mode = options.reporter === undefined ? 'demo' : 'live';
+    this.progress = saved ?? createProgress(options.config.attemptId, mode);
     this.tracker = new IncidentTracker(this.progress);
     this.code = codeForProgress(this.progress);
 
@@ -76,6 +85,14 @@ export class GameApp {
       now: this.now,
       particleScale: options.reducedMotion ? 0.25 : 1,
     });
+    if (options.reporter !== undefined) {
+      attachBreadcrumbs(this.engine, options.reporter);
+      this.live = new LiveEvidenceProvider({
+        reporter: options.reporter,
+        simulated: this.simulated,
+        fetchImpl: (input, init) => fetch(input, init),
+      });
+    }
     this.incidentConsole = new IncidentConsole({
       progressOf: (bug) => this.progress.bugs[bug],
       markEvidenceViewed: (bug) => this.tracker.markEvidenceViewed(bug),
@@ -102,6 +119,9 @@ export class GameApp {
   begin() {
     this.tracker.subscribe((progress) => this.onProgress(progress));
     this.engine.on((event) => this.onEvent(event));
+    if (this.live !== null) {
+      this.hud.showLiveMode();
+    }
     publishState(document, this.progress);
 
     this.input.attach(document, {
@@ -138,7 +158,7 @@ export class GameApp {
   showOpening() {
     if (!this.progress.launched) {
       this.overlays.show(
-        introCard({ returning: false, onStart: () => this.startRun() }),
+        introCard({ live: this.live !== null, returning: false, onStart: () => this.startRun() }),
       );
 
       return;
@@ -173,7 +193,7 @@ export class GameApp {
       this.openRestoredIncident(bug);
     };
     this.overlays.show(
-      introCard({ returning: true, onStart: () => this.resumeRun() }),
+      introCard({ live: this.live !== null, returning: true, onStart: () => this.resumeRun() }),
     );
   }
 
@@ -314,10 +334,15 @@ export class GameApp {
       `${definition.incidentLabel}: ${definition.title}. The Incident Console is open.`,
     );
 
-    void this.evidence.evidenceFor(encounter).then((evidence) => this.deliverEvidence(evidence));
+    void (this.live ?? this.simulated)
+      .evidenceFor(encounter)
+      .then((evidence) => this.deliverEvidence(evidence));
   }
 
-  /** A failure was restored from a saved run: reopen the console on its evidence. */
+  /**
+   * A failure was restored from a saved run: reopen the console on its evidence. The live capture is
+   * gone and a second report would be a duplicate, so live mode falls back to simulated evidence.
+   */
   openRestoredIncident(bug) {
     this.input.releaseAll();
     this.incidentConsole.open(bug);
@@ -328,9 +353,12 @@ export class GameApp {
 
       return;
     }
-    void this.evidence
-      .evidenceFor(canonicalEncounter(bug))
-      .then((evidence) => this.deliverEvidence(evidence));
+    const encounter = canonicalEncounter(bug);
+    const restored =
+      this.live === null
+        ? this.simulated.evidenceFor(encounter)
+        : this.live.fallback(encounter, 'restored');
+    void restored.then((evidence) => this.deliverEvidence(evidence));
   }
 
   /** Remember the evidence and show it if its console is still open. */

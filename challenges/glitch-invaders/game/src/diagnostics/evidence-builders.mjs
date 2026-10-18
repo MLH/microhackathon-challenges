@@ -29,8 +29,18 @@ export const WEAPON_STACK_FRAMES = [
     line: 160,
     inApp: true,
   },
-  { functionName: 'GameLoop.frame', file: 'game/src/app/app.mjs', line: 94, inApp: true },
+  { functionName: 'GameLoop.frame', file: 'game/src/app/app.mjs', line: 111, inApp: true },
   { functionName: 'requestAnimationFrame', file: '<browser>', line: 0, inApp: false },
+];
+
+/** Where the shield failure's live report says it happened; the same unit test checks this line. */
+export const SHIELD_STACK_FRAMES = [
+  {
+    functionName: 'resolveShieldHit',
+    file: 'game/src/shield/shield.mjs',
+    line: 17,
+    inApp: true,
+  },
 ];
 
 /** The canonical boss waterfall: the four loads, back to back. */
@@ -155,25 +165,32 @@ export function evidenceSections(encounter, breadcrumbs, spans) {
         },
       ];
     case 'boss':
-      return [
-        {
-          kind: 'waterfall',
-          title: 'Trace: boss-spawn',
-          totalMs: spans.reduce((end, span) => Math.max(end, span.startMs + span.durationMs), 0),
-          spans: [...spans],
-        },
-        {
-          kind: 'context',
-          title: 'boot_state',
-          contextName: 'boot_state',
-          entries: {
-            animationsLoaded: 'at game start',
-            spawnBudget: seconds(BOSS_SPAWN_BUDGET_MS),
-            strategy: 'sequential',
-          },
-        },
-      ];
+      return [waterfallSection(spans), bootStateSection()];
   }
+}
+
+/** The boss-spawn trace as a waterfall section, its total the end of the last span. */
+export function waterfallSection(spans) {
+  return {
+    kind: 'waterfall',
+    title: 'Trace: boss-spawn',
+    totalMs: spans.reduce((end, span) => Math.max(end, span.startMs + span.durationMs), 0),
+    spans: [...spans],
+  };
+}
+
+/** The boss failure's context: what the shipped boot code already did and the spawn budget. */
+export function bootStateSection() {
+  return {
+    kind: 'context',
+    title: 'boot_state',
+    contextName: 'boot_state',
+    entries: {
+      animationsLoaded: 'at game start',
+      spawnBudget: seconds(BOSS_SPAWN_BUDGET_MS),
+      strategy: 'sequential',
+    },
+  };
 }
 
 /** Format an issue reference for the simulated provider, such as `SIM-WEAPON-1`. */
