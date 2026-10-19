@@ -15,7 +15,7 @@ leaves the machine.
 | File | Purpose |
 | --- | --- |
 | `challenge.json`, `plugin.json` | Manifest and Agent Plugin metadata |
-| `sentry.json` | Public Sentry settings for live mode: DSN, org slug, project slug |
+| `sentry.json` | Default public Sentry settings for live mode: DSN, org slug, project slug |
 | `intro.md` | Intro screen text |
 | `skills/start-challenge/SKILL.md` | The guide Pi follows |
 | `monitor/SKILL.md` | Headless browser monitor skill |
@@ -44,20 +44,42 @@ the challenge manifest expects 4373.
 
 Live mode needs both halves:
 
-- **`sentry.json` filled in.** The DSN, org slug, and project slug are public
-  values, so they live in the package. While any value is still a
-  `<placeholder>`, the game runs in demo mode. Once filled in, a malformed value
-  fails setup naming it. An optional `apiUrl` replaces the Sentry API origin,
-  `https://sentry.io`, with a subdomain of it or, for the tests' local
-  stand-in, a loopback address; the token goes to no other host.
+- **Public Sentry settings.** The DSN, org slug, and project slug are public
+  values, so the package ships them in `sentry.json`. While any value there is
+  still a `<placeholder>`, the game runs in demo mode. Once filled in, a
+  malformed value fails setup naming it. An optional `apiUrl` replaces the
+  Sentry API origin, `https://sentry.io`, with a subdomain of it or, for the
+  tests' local stand-in, a loopback address; the token goes to no other host.
 - **`SENTRY_AUTH_TOKEN` in the environment.** On a station, the event vault's
   `sentry` service sets it to a placeholder that the vault proxy swaps for the
   real token. `boothstrap dev` and a standalone run read the real token from
   your shell.
 
+Sentry's own variables replace `sentry.json` when set: `SENTRY_DSN`,
+`SENTRY_ORG`, `SENTRY_PROJECT`, and optionally `SENTRY_URL` for `apiUrl`. They
+pass the same checks. Setting any of the first three requires all three, and
+setup fails naming the ones missing; an empty variable counts as unset. An
+event points at its own Sentry project by setting them under
+`challenge_env.glitch-invaders` in its config:
+
+```json
+{
+  "challenge_env": {
+    "glitch-invaders": {
+      "SENTRY_DSN": "https://<public key>@o<org id>.ingest.us.sentry.io/<project id>",
+      "SENTRY_ORG": "<org slug>",
+      "SENTRY_PROJECT": "<project slug>"
+    }
+  }
+}
+```
+
+These are public settings only: the token stays in the vault. A station
+whose boothstrap predates `challenge_env` uses `sentry.json`.
+
 `boothstrap dev` refuses to play the package unless `SENTRY_AUTH_TOKEN` or
 `SENTRY_API_KEY` is set, because `vault_services` names `sentry`. Any value
-keeps demo mode while `sentry.json` holds placeholders, and `SENTRY_API_KEY`
+keeps demo mode while the settings are placeholders, and `SENTRY_API_KEY`
 satisfies dev but leaves the game in demo mode, since the package reads only
 `SENTRY_AUTH_TOKEN`.
 
@@ -73,7 +95,7 @@ page or written anywhere. The page's CSP lets it contact only this server and
 the DSN's ingest origin. If Sentry doesn't accept the report or can't return it
 within about 15 seconds, that incident shows simulated evidence with a note
 saying so. Setup prints `(live Sentry mode)` after the URL when live mode is on,
-and a note when `sentry.json` is filled in but the token is missing.
+and a note when the settings are filled in but the token is missing.
 
 Because `vault_services` names `sentry`, the event vault must hold a `sentry`
 service, or the station lists the challenge as unavailable, on every boothstrap
@@ -93,9 +115,11 @@ no token and runs in demo mode.
 ## Run without boothstrap
 
 Needs Node 26 and a `GEMINI_API_KEY`; export `SENTRY_AUTH_TOKEN` too for live
-mode. Follow the standalone steps in boothstrap.sh's
-`docs/authoring-challenges.md` to install Pi and load the package as an Agent
-Plugin, then:
+mode. The game reports to the project in `sentry.json` unless you export
+`SENTRY_DSN`, `SENTRY_ORG`, and `SENTRY_PROJECT` for another, as
+[Live Sentry mode](#live-sentry-mode) describes. Follow the standalone steps
+in boothstrap.sh's `docs/authoring-challenges.md` to install Pi and load the
+package as an Agent Plugin, then:
 
 ```sh
 challenge=/absolute/path/to/glitch-invaders

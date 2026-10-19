@@ -1256,6 +1256,64 @@ test('setup fails naming sentry.json when a filled-in value is malformed', async
   assert.match(setup.output, /setup: sentry\.json: invalid runtime config: sentry\.dsn must be a Sentry DSN/);
 });
 
+test('setup takes live Sentry settings from SENTRY_DSN, SENTRY_ORG, SENTRY_PROJECT, and SENTRY_URL over sentry.json', async (testContext) => {
+  const standIn = await startSentryStandIn(testContext);
+  const packageDir = await makePackageWithSettings({
+    dsn: 'https://packagekey@o9.ingest.us.sentry.io/99',
+    org: 'package-org',
+    project: 'package-project',
+  });
+  const stack = await startLivePackage(testContext, packageDir, {
+    SENTRY_AUTH_TOKEN: SENTRY_TOKEN,
+    SENTRY_DSN: LIVE_DSN,
+    SENTRY_ORG: 'mlh',
+    SENTRY_PROJECT: 'glitch-invaders',
+    SENTRY_URL: standIn.url,
+  });
+
+  const config = await (await fetch(`${stack.base}/runtime-config.json`)).json();
+  const evidence = await fetchEvidence(stack.base, 'weapon', WEAPON_EVENT_ID);
+
+  assert.match(stack.output, /\(live Sentry mode\)/);
+  assert.deepEqual(config.sentry, { dsn: LIVE_DSN, org: 'mlh', project: 'glitch-invaders', apiUrl: standIn.url });
+  assert.equal(evidence.status, 200);
+  assert.equal(standIn.requests[0].url.pathname, `/api/0/projects/mlh/glitch-invaders/events/${WEAPON_EVENT_ID}/`);
+});
+
+test('setup fails naming the unset variables when the environment sets only some Sentry settings', async (testContext) => {
+  const workspace = await makeTemporaryDirectory(testContext);
+  const env = { ...hookEnvironment(workspace, await freePort()), SENTRY_DSN: LIVE_DSN, SENTRY_ORG: '' };
+  testContext.after(() => runHook('cleanup', env));
+
+  const setup = await runHook('setup', env);
+
+  assert.equal(setup.code, 1);
+  assert.match(
+    setup.stderr,
+    /setup: Sentry settings in the environment are incomplete: SENTRY_ORG, SENTRY_PROJECT not set/,
+  );
+});
+
+test('setup fails naming the environment when a Sentry setting there is malformed', async (testContext) => {
+  const workspace = await makeTemporaryDirectory(testContext);
+  const env = {
+    ...hookEnvironment(workspace, await freePort()),
+    SENTRY_DSN: LIVE_DSN,
+    SENTRY_ORG: 'mlh',
+    SENTRY_PROJECT: 'glitch-invaders',
+    SENTRY_URL: 'https://sentry.example.com',
+  };
+  testContext.after(() => runHook('cleanup', env));
+
+  const setup = await runHook('setup', env);
+
+  assert.equal(setup.code, 1);
+  assert.match(
+    setup.stderr,
+    /setup: Sentry settings in the environment: invalid runtime config: sentry\.apiUrl must be https:\/\/sentry\.io or a subdomain/,
+  );
+});
+
 test('live mode fetches the weapon issue from the Sentry API with the token and returns its stack trace', async (testContext) => {
   const stack = await startLiveStack(testContext);
 
