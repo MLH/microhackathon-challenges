@@ -497,18 +497,24 @@ function runPackageHook(packageDir, hook, env) {
 }
 
 /**
- * Copy the package and fill in its `sentry.json` with live settings pointing at `apiUrl`, so the
- * shipped hooks run against the stand-in. Resolves with the copy's directory, which
+ * Copy the package with `settings` as its `sentry.json`. Resolves with the copy's directory, which
  * {@link startLivePackage} removes once its cleanup hook has run.
  */
-async function makeLivePackage(apiUrl) {
+async function makePackageWithSettings(settings) {
   const copyRoot = await mkdtemp(path.join(os.tmpdir(), 'glitch-package-'));
   const packageDir = path.join(copyRoot, 'glitch-invaders');
   await cp(packageDirectory, packageDir, { recursive: true });
-  const settings = { dsn: LIVE_DSN, org: 'mlh', project: 'glitch-invaders', apiUrl };
   await writeFile(path.join(packageDir, 'sentry.json'), `${JSON.stringify(settings)}\n`);
 
   return packageDir;
+}
+
+/**
+ * Copy the package with live settings pointing at `apiUrl`, so the shipped hooks run against the
+ * stand-in.
+ */
+function makeLivePackage(apiUrl) {
+  return makePackageWithSettings({ dsn: LIVE_DSN, org: 'mlh', project: 'glitch-invaders', apiUrl });
 }
 
 /**
@@ -1194,26 +1200,31 @@ test('setup and cleanup run standalone from the current directory with no BOOTHS
   assert.equal(existsSync(path.join(workspace, '.glitch')), false);
 });
 
-test('the package names the gemini and sentry vault services and ships placeholder Sentry settings', async () => {
+test('the package names the gemini and sentry vault services and ships live Sentry settings for sentry.io', async () => {
   const manifest = JSON.parse(await readFile(path.join(packageDirectory, 'challenge.json'), 'utf8'));
   const settings = JSON.parse(await readFile(path.join(packageDirectory, 'sentry.json'), 'utf8'));
 
   assert.deepEqual(manifest.vault_services, ['gemini', 'sentry']);
-  for (const key of ['dsn', 'org', 'project']) {
-    assert.match(settings[key], /^<.+>$/, `${key} is not a placeholder`);
-  }
+  assert.match(settings.dsn, /^https:\/\/[0-9a-f]{32}@o\d+\.ingest\.(us\.)?sentry\.io\/\d+$/);
+  assert.match(settings.org, /^[a-z0-9-]+$/);
+  assert.match(settings.project, /^[a-z0-9-]+$/);
+  assert.equal(settings.apiUrl, undefined);
 });
 
 test('setup stays in demo mode with SENTRY_AUTH_TOKEN set while sentry.json holds placeholders', async (testContext) => {
-  const stack = await startStack(testContext, { SENTRY_AUTH_TOKEN: SENTRY_TOKEN });
+  const packageDir = await makePackageWithSettings({
+    dsn: '<https://public-key@o0.ingest.us.sentry.io/0>',
+    org: '<org-slug>',
+    project: '<project-slug>',
+  });
+  const stack = await startLivePackage(testContext, packageDir, { SENTRY_AUTH_TOKEN: SENTRY_TOKEN });
 
-  const config = await (await fetch(`${stack.url}runtime-config.json`)).json();
-  const page = await getRaw(stack.url, '/');
-  const evidence = await fetchEvidence(stack.url.replace(/\/$/, ''), 'weapon', WEAPON_EVENT_ID);
+  const config = await (await fetch(`${stack.base}/runtime-config.json`)).json();
+  const page = await getRaw(`${stack.base}/`, '/');
+  const evidence = await fetchEvidence(stack.base, 'weapon', WEAPON_EVENT_ID);
 
-  assert.deepEqual(config, { attemptId: stack.attemptId });
-  assert.equal(stack.live, false);
-  assert.equal(stack.note, null);
+  assert.deepEqual(Object.keys(config), ['attemptId']);
+  assert.doesNotMatch(stack.output, /live Sentry mode/);
   assert.equal(page.headers['content-security-policy'], CONTENT_SECURITY_POLICY);
   assert.equal(evidence.status, 404);
 });
