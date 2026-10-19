@@ -57,9 +57,12 @@ Live mode needs both halves:
 
 Sentry's own variables replace `sentry.json` when set: `SENTRY_DSN`,
 `SENTRY_ORG`, `SENTRY_PROJECT`, and optionally `SENTRY_URL` for `apiUrl`. They
-pass the same checks. Setting any of the first three requires all three, and
-setup fails naming the ones missing; an empty variable counts as unset. An
-event points at its own Sentry project by setting them under
+pass the same checks, and a malformed one fails setup naming it. `SENTRY_URL`
+must be `https://sentry.io` or a subdomain origin, a trailing `/` allowed;
+without it, `apiUrl` is `https://sentry.io`, not `sentry.json`'s, and alone it
+is ignored. Setting any of the first three requires all three, and setup fails
+naming the ones missing; an empty variable counts as unset. An event points at
+its own Sentry project by setting them under
 `challenge_env.glitch-invaders` in its config:
 
 ```json

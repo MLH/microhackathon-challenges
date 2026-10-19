@@ -25,6 +25,27 @@ const SENTRY_SETTING_VARIABLES = {
 /** The settings an event must set together: all of them but the optional API origin. */
 const REQUIRED_SETTINGS = ['dsn', 'org', 'project'];
 
+/**
+ * Reduce `apiUrl` written with a bare trailing slash, as sentry-cli documents `SENTRY_URL`
+ * (`https://sentry.io/`), to its origin; any other value is left for validation to judge.
+ */
+function trimBareTrailingSlash(apiUrl) {
+  const url = URL.parse(apiUrl);
+  if (url === null || url.href !== `${url.origin}/`) {
+    return apiUrl;
+  }
+
+  return url.origin;
+}
+
+/** Rewrite a validation message's `sentry.<setting>` into the variable that set it. */
+function nameVariableIn(message) {
+  return message.replace(
+    /sentry\.(\w+)/,
+    (field, setting) => SENTRY_SETTING_VARIABLES[setting] ?? field,
+  );
+}
+
 /** Whether `value` is still a `<placeholder>` waiting for MLH's real setting. */
 function isPlaceholder(value) {
   return typeof value === 'string' && value.startsWith('<') && value.endsWith('>');
@@ -71,7 +92,7 @@ export async function readSentryConfig(packageDir) {
  * @returns {ReturnType<typeof parseSentrySettings> | null} the settings, or `null` when none of
  *   `SENTRY_DSN`, `SENTRY_ORG`, and `SENTRY_PROJECT` is set.
  * @throws {Error} naming the missing variables when only some of those three are set, or the
- *   environment when a value is malformed.
+ *   malformed variable.
  */
 function readSentryEnvironment(env) {
   const record = {};
@@ -90,10 +111,13 @@ function readSentryEnvironment(env) {
     const names = missing.map((setting) => SENTRY_SETTING_VARIABLES[setting]).join(', ');
     throw new Error(`Sentry settings in the environment are incomplete: ${names} not set`);
   }
+  if (record.apiUrl !== undefined) {
+    record.apiUrl = trimBareTrailingSlash(record.apiUrl);
+  }
   try {
     return parseSentrySettings(record);
   } catch (error) {
-    throw new Error(`Sentry settings in the environment: ${error.message}`);
+    throw new Error(nameVariableIn(error.message));
   }
 }
 
