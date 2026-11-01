@@ -1,6 +1,8 @@
 node_modules/
 .env
 tmp/
+.testdriver/
+test-results/
 .claude/settings.local.json
 .claude/worktrees/
 .claude/scheduled_tasks.lock
