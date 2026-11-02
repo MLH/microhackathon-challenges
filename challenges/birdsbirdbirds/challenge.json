@@ -19,7 +19,7 @@
     {
       "id": "draw-bird",
       "title": "Draw your bird",
-      "hint": "Draw a bird on the page and press Save.",
+      "hint": "Draw a bird on the page and press Save my bird.",
       "done_when": "The file bird.png exists in the workspace."
     },
     {

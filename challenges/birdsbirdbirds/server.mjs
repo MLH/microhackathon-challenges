@@ -116,7 +116,7 @@ function sendSavedBird(response, workspace) {
     body = readWorkspaceFile(path.join(workspace, 'bird.png'), MAX_PNG_BYTES)
   } catch (error) {
     if (error.code === 'ENOENT') return sendText(response, 404, 'no bird.png yet')
-    if (error instanceof RefusedFileError) return sendText(response, 422, `${error.message}; press Save on the drawing page again`)
+    if (error instanceof RefusedFileError) return sendText(response, 422, `${error.message}; press Save my bird on the drawing page again`)
     throw error
   }
 
