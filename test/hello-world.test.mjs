@@ -60,6 +60,14 @@ test('skill names every step the manifest declares', async () => {
   }
 })
 
+test('intro has no doubled punctuation once the station strips its markup', async () => {
+  const intro = await readFile(path.join(challengeDirectory, 'intro.md'), 'utf8')
+
+  const rendered = intro.replaceAll(/[`*]/g, '')
+
+  assert.doesNotMatch(rendered, /[!?.][.!?]/)
+})
+
 test('setup seeds welcome.txt in the workspace', async (context) => {
   const cwd = await makeDirectory(context)
   const workspace = await makeDirectory(context)
