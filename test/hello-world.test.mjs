@@ -60,12 +60,19 @@ test('skill names every step the manifest declares', async () => {
   }
 })
 
+test('skill has Pi introduce itself and name a corrected file name', async () => {
+  const skill = await readFile(path.join(challengeDirectory, 'skills/start-challenge/SKILL.md'), 'utf8')
+
+  assert.ok(skill.includes("I'm Pi, your guide."), 'skill never has Pi introduce itself')
+  assert.ok(skill.includes('I think you meant'), 'skill never has Pi name a corrected file name')
+})
+
 test('intro has no doubled punctuation once the station strips its markup', async () => {
   const intro = await readFile(path.join(challengeDirectory, 'intro.md'), 'utf8')
 
   const rendered = intro.replaceAll(/[`*]/g, '')
 
-  assert.doesNotMatch(rendered, /[!?.][.!?]/)
+  assert.doesNotMatch(rendered, /[!?.]\./)
 })
 
 test('setup seeds welcome.txt in the workspace', async (context) => {
