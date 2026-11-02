@@ -42,7 +42,7 @@ const toSkyButton = document.getElementById('to-sky-button')
 const drawAgainButton = document.getElementById('draw-again-button')
 const sky = document.getElementById('sky')
 
-const INITIAL_PROMPT = 'Pick a colour and start drawing.'
+const INITIAL_PROMPT = statusLine.textContent
 const DRAWN_PROMPT = 'Looking good! Press Save my bird when it’s done.'
 
 const pen = { colour: COLOURS[0].value, width: PEN_SIZES[1].width, erasing: false }
@@ -294,6 +294,7 @@ function showDraw() {
   skyMode.hidden = true
   drawMode.hidden = false
   sky.replaceChildren()
+  setStatus(INITIAL_PROMPT)
   toSkyButton.hidden = flight.entry === undefined
 }
 

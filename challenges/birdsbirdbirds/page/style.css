@@ -51,7 +51,7 @@ button:disabled {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   max-width: 1280px;
-  height: max(100dvh, 540px);
+  height: max(100dvh, 560px);
   margin: 0 auto;
   padding: 10px 20px 14px;
 }
@@ -73,11 +73,17 @@ button:disabled {
   min-height: 0;
 }
 
-.toolbar {
+.side-column {
   display: flex;
   flex-direction: column;
   gap: 8px;
   flex: 0 0 280px;
+}
+
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .tool-group {
@@ -184,6 +190,29 @@ button:disabled {
   background-color: #fff;
   background-image: conic-gradient(#e7e9f2 25%, transparent 0 50%, #e7e9f2 0 75%, transparent 0);
   background-size: 32px 32px;
+}
+
+/* Too narrow for tools beside the canvas: draw first, tools below, and let the
+   page scroll. The canvas column needs a definite height for its container
+   query sizing. */
+@media (max-width: 40rem) {
+  #draw-mode {
+    height: auto;
+  }
+
+  .draw-layout {
+    flex-direction: column;
+  }
+
+  .canvas-column {
+    flex: none;
+    order: -1;
+    height: min(100vw - 40px, 640px);
+  }
+
+  .side-column {
+    flex-basis: auto;
+  }
 }
 
 #drawing {

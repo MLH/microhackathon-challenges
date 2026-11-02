@@ -18,28 +18,30 @@
     </header>
 
     <div class="draw-layout">
-      <div class="toolbar" role="toolbar" aria-label="Drawing tools">
-        <fieldset class="tool-group">
-          <legend>Colour</legend>
-          <div class="swatches" id="swatches"></div>
-        </fieldset>
+      <div class="side-column">
+        <div class="toolbar" role="toolbar" aria-label="Drawing tools">
+          <fieldset class="tool-group">
+            <legend>Colour</legend>
+            <div class="swatches" id="swatches"></div>
+          </fieldset>
 
-        <fieldset class="tool-group">
-          <legend>Pen size</legend>
-          <div class="sizes" id="sizes"></div>
-        </fieldset>
+          <fieldset class="tool-group">
+            <legend>Pen size</legend>
+            <div class="sizes" id="sizes"></div>
+          </fieldset>
 
-        <fieldset class="tool-group">
-          <legend>Tool</legend>
-          <div class="tools">
-            <button type="button" class="tool-button" id="pen-button" aria-pressed="true">Pen</button>
-            <button type="button" class="tool-button" id="eraser-button" aria-pressed="false">Eraser</button>
+          <fieldset class="tool-group">
+            <legend>Tool</legend>
+            <div class="tools">
+              <button type="button" class="tool-button" id="pen-button" aria-pressed="true">Pen</button>
+              <button type="button" class="tool-button" id="eraser-button" aria-pressed="false">Eraser</button>
+            </div>
+          </fieldset>
+
+          <div class="tool-group actions">
+            <button type="button" class="action-button" id="undo-button" title="Undo (Ctrl+Z or Cmd+Z)" disabled>Undo</button>
+            <button type="button" class="action-button" id="clear-button">Clear</button>
           </div>
-        </fieldset>
-
-        <div class="tool-group actions">
-          <button type="button" class="action-button" id="undo-button" title="Undo (Ctrl+Z or Cmd+Z)" disabled>Undo</button>
-          <button type="button" class="action-button" id="clear-button">Clear</button>
         </div>
 
         <div class="save-area">
