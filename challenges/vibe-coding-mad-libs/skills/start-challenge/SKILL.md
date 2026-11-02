@@ -56,9 +56,10 @@ participant which step they finished instead, without mentioning points.
    name], and staff can remove it at any time."
 
    On a no, go on to step 5 without publishing. On a yes, use `bash` to run
-   `node "$BOOTHSTRAP_PACKAGE_DIR/screenshot.mjs"`, which saves the preview's
-   first screen as `screenshot.png` in the current directory, then call
-   `publish_gallery_item` with:
+   `node "$BOOTHSTRAP_PACKAGE_DIR/screenshot.mjs"` with no `timeout`, or one
+   of at least 60 seconds; it gives up on its own after 30. It saves the
+   preview's first screen as `screenshot.png` in the current directory. Then
+   call `publish_gallery_item` with:
    - `kind`: `app`
    - `title`: `<Theme> about <Subject>`, from their answers
    - `renderer`: `mad-libs-v1`
@@ -67,8 +68,9 @@ participant which step they finished instead, without mentioning points.
      "...", "subject": "...", "audience": "...", "style": "..." } }`, with the
      sentence exactly as they sent it and each blank exactly as they filled it
 
-   If the screenshot or the publish fails, tell them their app couldn't go on
-   the screens this time, and go on to step 5.
+   When it publishes, tell them it's on its way to the booth screens, then go
+   on to step 5. If the screenshot or the publish fails, tell them their app
+   couldn't go on the screens this time, and go on to step 5.
 5. **Finish.** Report `improve-app`, whatever the gallery answer was.
 
 ## Building the app

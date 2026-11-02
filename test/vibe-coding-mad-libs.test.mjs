@@ -810,3 +810,22 @@ test('the screenshot helper stops Chrome and removes its profile when interrupte
   assert.deepEqual(await readdir(temporaryDirectory), [])
   assert.equal(await exists(path.join(workspace, 'screenshot.png')), false)
 })
+
+test('a SIGKILL to the group running the screenshot helper also stops Chrome, as Pi\'s bash tool sends on abort or timeout', async (context) => {
+  const { workspace, port } = await startPreviewWithApp(context)
+  const chrome = await writeHangingChrome(await makeTemporaryDirectory(context))
+  const [helperPath, url] = screenshotArguments(port)
+  const shell = spawn('sh', ['-c', `"${process.execPath}" "${helperPath}" "${url}"`], {
+    cwd: workspace,
+    detached: true,
+    env: { ...process.env, CHROME_PATH: chrome.executable },
+    stdio: 'ignore',
+  })
+  const exited = new Promise((resolve) => shell.once('exit', resolve))
+  await waitForFile(chrome.pidFile)
+
+  process.kill(-shell.pid, 'SIGKILL')
+
+  await exited
+  await waitUntilStopped(Number(await readFile(chrome.pidFile, 'utf8')))
+})

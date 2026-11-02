@@ -25,10 +25,22 @@ const INSTALLED_CHROME_PATHS = [
   '/opt/google/chrome/chrome',
 ]
 
-/** The whole capture, Chrome's start included, must finish within this. */
+/**
+ * The whole helper, the preview check and Chrome's start included, gives up
+ * after this. The skill gives its command at least twice as long, so the
+ * helper always stops Chrome itself.
+ */
 const CAPTURE_TIMEOUT_MS = 30_000
 
-/** Signals that end the helper early, as Pi's bash tool does on abort or timeout. */
+/** How long Chrome gets to exit after SIGTERM before it is killed. */
+const STOP_GRACE_MS = 2_000
+
+/**
+ * Signals a person or a parent can send to end the helper early. Pi's bash
+ * tool instead SIGKILLs the command's whole process group on abort or
+ * timeout; that can't be caught, but Chrome shares the group, so it reaches
+ * Chrome too.
+ */
 const INTERRUPTS = ['SIGINT', 'SIGTERM', 'SIGHUP']
 
 /** How often to look for Chrome's first page while it opens. */
@@ -63,10 +75,10 @@ export function findChrome(environment = process.env, candidates = INSTALLED_CHR
   return installed
 }
 
-/** Throws unless `url` answers with a 2xx status. */
-async function assertAnswering(url) {
+/** Throws unless `url` answers with a 2xx status before `signal` aborts. */
+async function assertAnswering(url, signal) {
   try {
-    const response = await fetch(url, { signal: AbortSignal.timeout(5_000) })
+    const response = await fetch(url, { signal })
     await response.arrayBuffer()
     if (response.ok) return
   } catch {
@@ -94,12 +106,15 @@ function launchChrome(executable, profile) {
     '--no-first-run',
     '--no-default-browser-check',
     '--no-proxy-server',
+    // A login Keychain lookup can prompt or block on macOS; the station's own launcher passes this too.
+    '--use-mock-keychain',
+    '--disable-background-networking',
+    '--disable-component-update',
     '--hide-scrollbars',
     `--window-size=${VIEWPORT.width},${VIEWPORT.height}`,
     'about:blank',
   ], {
     cwd: profile,
-    detached: true,
     env: { ...process.env, ...shortTemporaryDirectory },
     stdio: ['ignore', 'ignore', 'pipe'],
   })
@@ -202,24 +217,24 @@ async function capturePage(devTools, url) {
   return Buffer.from(data, 'base64')
 }
 
-/** Kills Chrome's whole process group, so no helper outlives it. Does nothing if it never started or is gone. */
-function killChromeGroup(child) {
-  if (child.pid === undefined) return
-
-  try {
-    process.kill(-child.pid, 'SIGKILL')
-  } catch (error) {
-    if (error.code !== 'ESRCH') throw error
-  }
+/** True while `child` has started and not yet exited. */
+function isRunning(child) {
+  return child.pid !== undefined && child.exitCode === null && child.signalCode === null
 }
 
-/** Kills Chrome's process group and resolves once Chrome has exited, or at once if it never started. */
-function stopChrome(child) {
-  const running = child.pid !== undefined && child.exitCode === null && child.signalCode === null
-  const exited = running ? new Promise((resolve) => child.once('exit', resolve)) : Promise.resolve()
-  killChromeGroup(child)
+/**
+ * Asks Chrome to quit with SIGTERM, which also ends its helper processes, and
+ * kills it if it hasn't exited after the grace period. Resolves once it has
+ * exited, or at once if it never started.
+ */
+async function stopChrome(child) {
+  if (!isRunning(child)) return
 
-  return exited
+  const exited = new Promise((resolve) => child.once('exit', resolve))
+  child.kill('SIGTERM')
+  const killTimer = setTimeout(() => child.kill('SIGKILL'), STOP_GRACE_MS)
+  await exited
+  clearTimeout(killTimer)
 }
 
 /**
@@ -228,7 +243,7 @@ function stopChrome(child) {
  */
 function cleanUpOnInterrupt(child, profile) {
   const onInterrupt = () => {
-    killChromeGroup(child)
+    if (isRunning(child)) child.kill('SIGKILL')
     rmSync(profile, { recursive: true, force: true, maxRetries: 3 })
     process.exit(1)
   }
@@ -237,34 +252,47 @@ function cleanUpOnInterrupt(child, profile) {
   return () => INTERRUPTS.forEach((signal) => process.off(signal, onInterrupt))
 }
 
-/** Rejects after `milliseconds` with a message naming what timed out; `clear()` cancels it. */
+/**
+ * Rejects `expired` and aborts `signal` after `milliseconds`, with a message
+ * naming the limit; `clear()` cancels it.
+ */
 function deadline(milliseconds) {
+  const controller = new AbortController()
+  const reason = new Error(`the screenshot took longer than ${milliseconds} ms`)
   let timer
   const expired = new Promise((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(`the screenshot took longer than ${milliseconds} ms`)), milliseconds)
+    timer = setTimeout(() => {
+      controller.abort(reason)
+      reject(reason)
+    }, milliseconds)
   })
 
-  return { expired, clear: () => clearTimeout(timer) }
+  return { expired, signal: controller.signal, clear: () => clearTimeout(timer) }
 }
 
 /**
  * Captures `url` with the Chrome `findChrome` picks and writes the PNG to
  * `outputPath`, replacing any file or link there. Throws, writing nothing,
- * when the page isn't answering, Chrome is missing or fails, or it takes
- * longer than `timeoutMs`. Chrome's profile lives in TMPDIR and is removed,
- * with Chrome stopped, on every outcome, an interrupt included.
+ * when the page isn't answering, Chrome is missing or fails, or the whole
+ * capture takes longer than `timeoutMs`. Chrome's profile lives in TMPDIR and
+ * is removed, with Chrome stopped, on every outcome but a SIGKILL, which
+ * leaves the profile for the session's reset.
  */
 export async function saveScreenshot({ url, outputPath, environment = process.env, timeoutMs = CAPTURE_TIMEOUT_MS }) {
-  await assertAnswering(url)
-  const executable = findChrome(environment)
-
-  const profile = mkdtempSync(path.join(tmpdir(), 'mad-libs-screenshot-'))
   const timeout = deadline(timeoutMs)
-  const chrome = launchChrome(executable, profile)
-  const stopCleaningUpOnInterrupt = cleanUpOnInterrupt(chrome.child, profile)
+  let chrome
+  let profile
+  let stopCleaningUpOnInterrupt = () => {}
   let devTools
   try {
     const capture = (async () => {
+      await assertAnswering(url, timeout.signal)
+      const executable = findChrome(environment)
+      timeout.signal.throwIfAborted()
+
+      profile = mkdtempSync(path.join(tmpdir(), 'mad-libs-screenshot-'))
+      chrome = launchChrome(executable, profile)
+      stopCleaningUpOnInterrupt = cleanUpOnInterrupt(chrome.child, profile)
       devTools = await connectDevTools(await findPageEndpoint(await chrome.browserEndpoint))
 
       return capturePage(devTools, url)
@@ -278,8 +306,8 @@ export async function saveScreenshot({ url, outputPath, environment = process.en
   } finally {
     timeout.clear()
     devTools?.close()
-    await stopChrome(chrome.child)
-    rmSync(profile, { recursive: true, force: true, maxRetries: 3 })
+    if (chrome) await stopChrome(chrome.child)
+    if (profile) rmSync(profile, { recursive: true, force: true, maxRetries: 3 })
     stopCleaningUpOnInterrupt()
   }
 }

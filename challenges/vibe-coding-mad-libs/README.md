@@ -75,6 +75,9 @@ every field with `textContent`, never as HTML.
 `screenshot.mjs` runs Google Chrome headless with a throwaway profile in
 `TMPDIR` and captures the page over the DevTools protocol. It uses the Chrome
 at `CHROME_PATH`, else Google Chrome's standard install on macOS or Linux, and
-fails, writing nothing, when the preview isn't answering or Chrome is missing.
+fails, writing nothing, when the preview isn't answering, Chrome is missing,
+or the whole capture takes over 30 seconds. Chrome stays in the helper's
+process group, so the group kill Pi's bash tool sends on abort or timeout
+stops Chrome too.
 To try it standalone, run `node "$challenge/screenshot.mjs" [url]` in the
 workspace while the preview runs; the URL defaults to the preview.
