@@ -12,6 +12,9 @@ const PAD_PULSE_MS = 180;
 /** A tap on a move pad holds long enough to carry the ship one enemy-formation lane. */
 export const TAP_MOVE_MS = Math.round(((ENEMY_WIDTH + ENEMY_GAP_X) / PLAYER_SPEED) * 1000);
 
+/** How many lanes of movement a burst of taps can queue ahead of the ship. */
+const MAX_TAP_QUEUE_LANES = 2;
+
 /** The keys that mean each control. */
 const KEY_CONTROLS = new Map([
   ['ArrowLeft', 'left'],
@@ -89,7 +92,6 @@ export class InputController {
       pointers.add(event.pointerId);
       this.pointersDown.set(control, pointers);
       if (OPPOSITE_PADS.has(control)) {
-        this.cancelTimedHold(OPPOSITE_PADS.get(control));
         this.tap(control);
       }
       this.recompute();
@@ -112,18 +114,33 @@ export class InputController {
     });
   }
 
-  /** A tap on a move pad: hold one more lane's worth, so two quick taps move about two lanes. */
+  /**
+   * A tap on a move pad: hold one more lane's worth, so two quick taps move about two lanes. The
+   * hold never runs past {@link MAX_TAP_QUEUE_LANES} lanes from now, so a burst of taps cannot queue
+   * seconds of movement.
+   */
   tap(control) {
     const now = Date.now();
     const pendingEnd = this.timedHolds.get(control)?.endsAt ?? now;
-    this.holdUntil(control, Math.max(pendingEnd, now) + TAP_MOVE_MS);
+    const queuedEnd = Math.max(pendingEnd, now) + TAP_MOVE_MS;
+    this.cancelOppositeTap(control);
+    this.holdUntil(control, Math.min(queuedEnd, now + MAX_TAP_QUEUE_LANES * TAP_MOVE_MS));
   }
 
   /** Hold `control` for a keyboard activation; repeats do not add up, so auto-repeat stops on release. */
   pulse(control) {
+    this.cancelOppositeTap(control);
     const pendingEnd = this.timedHolds.get(control)?.endsAt ?? 0;
     this.holdUntil(control, Math.max(pendingEnd, Date.now() + PAD_PULSE_MS));
     this.recompute();
+  }
+
+  /** End the pending timed hold of the move pad opposite `control`, if it has one. */
+  cancelOppositeTap(control) {
+    const opposite = OPPOSITE_PADS.get(control);
+    if (opposite !== undefined) {
+      this.cancelTimedHold(opposite);
+    }
   }
 
   /** Hold `control` until the `endsAt` timestamp, replacing any timed hold it has. */

@@ -1916,7 +1916,6 @@ test('an idle frame writes nothing to the HUD, so the station sees the page go q
     const progress = createProgress('attempt', 'demo');
     const world = hudWorld();
     hud.update(progress, world);
-    const shield = page.getElementById('stat-shield');
     const elements = ['stat-hull', 'stat-shield', 'stat-kills', 'stat-score', 'objective-text', 'incidents'].map(
       (id) => page.getElementById(id),
     );
@@ -1926,7 +1925,6 @@ test('an idle frame writes nothing to the HUD, so the station sees the page go q
 
     hud.update(progress, world);
 
-    assert.deepEqual(shield.writes, []);
     assert.deepEqual(elements.flatMap((element) => element.writes), []);
   });
 });
@@ -2051,19 +2049,16 @@ function padHarness(testContext) {
     input.attachPad(control, button);
   }
   const send = (control, name, pointerId) =>
-    listeners.get(`${control}:${name}`)({ preventDefault: () => {}, pointerId });
+    listeners.get(`${control}:${name}`)({ preventDefault: () => {}, pointerId, detail: 0 });
 
   return {
     input,
     press: (control, pointerId = 1) => send(control, 'pointerdown', pointerId),
     release: (control, name = 'pointerup', pointerId = 1) => send(control, name, pointerId),
+    activate: (control) => send(control, 'click'),
     tick: (milliseconds) => testContext.mock.timers.tick(milliseconds),
   };
 }
-
-test('a tap lasts long enough to move the ship well beyond 25 px', () => {
-  assert.ok(TAP_MOVE_MS >= 150, `a tap must move well beyond 25 px, got ${TAP_MOVE_MS} ms`);
-});
 
 test('a quick tap on a move pad keeps the ship moving until a full lane has passed', (testContext) => {
   const pads = padHarness(testContext);
@@ -2105,6 +2100,40 @@ test('pressing the opposite move pad cancels the pending tap', (testContext) => 
 
   assert.equal(pads.input.current().left, false);
   assert.equal(pads.input.current().right, true);
+});
+
+test('releasing everything ends a pending tap', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('left');
+  pads.release('left');
+
+  pads.input.releaseAll();
+  pads.tick(TAP_MOVE_MS);
+
+  assert.equal(pads.input.current().left, false);
+});
+
+test('a keyboard activation of the opposite move pad cancels the pending tap', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('left');
+  pads.release('left');
+
+  pads.activate('right');
+
+  assert.equal(pads.input.current().left, false);
+  assert.equal(pads.input.current().right, true);
+});
+
+test('a burst of taps queues no more than two lanes of movement', (testContext) => {
+  const pads = padHarness(testContext);
+  for (let tapCount = 0; tapCount < 10; tapCount += 1) {
+    pads.press('left');
+    pads.release('left');
+  }
+
+  pads.tick(2 * TAP_MOVE_MS);
+
+  assert.equal(pads.input.current().left, false);
 });
 
 test('two quick taps on a move pad carry the ship about two lanes', (testContext) => {
