@@ -25,7 +25,7 @@ dependencies beyond Node.
 
 ## How steps advance
 
-Pi opens the drawing page with `show_preview` as soon as the challenge
+Pi offers the drawing page with `show_preview` as soon as the challenge
 starts. The extension watches the workspace and sends Pi a hidden message
 starting with `[birdsbirdbirds]` when the participant saves a new `bird.png`.
 It starts a turn when Pi is idle and follows the current turn otherwise. The

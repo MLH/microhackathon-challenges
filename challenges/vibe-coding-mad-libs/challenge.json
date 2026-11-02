@@ -16,7 +16,7 @@
     {
       "id": "fill-prompt",
       "title": "Fill in your prompt",
-      "hint": "Fill the four blanks. Invent answers, or roll dice and look them up with the form's Roll dice.",
+      "hint": "Fill the four blanks. Invent answers, or roll dice and look them up under Roll dice in the form.",
       "done_when": "The participant sent a prompt naming a kind of app, a subject, an audience, and a style, with no blank left unfilled."
     },
     {

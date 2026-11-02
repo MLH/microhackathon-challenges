@@ -1,5 +1,6 @@
-// The optional dice tables, parsed from dice-sheet.md: the one copy the form
-// shows and setup gives the workspace.
+// The optional dice tables, parsed from dice-sheet.md. dice-sheet.md is the
+// one source: the form shows these tables, and setup copies the file into the
+// workspace.
 
 import { readFileSync } from 'node:fs'
 

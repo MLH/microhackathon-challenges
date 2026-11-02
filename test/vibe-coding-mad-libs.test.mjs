@@ -380,12 +380,22 @@ test('Roll dice shows every row of dice-sheet.md, compactly by field', installed
   const { form, screen } = await openMadLibsForm()
 
   openDiceView(form)
-  const shown = screen().join(' ').replaceAll('\u00a0', ' ')
+  const shown = screen().join(' ')
 
   assert.match(shown, /Theme \(d6\): 1 Dashboard · 2 Game · 3 Generator/)
   for (const row of diceRows(await readFile(diceSheetPath, 'utf8'))) {
     assert.ok(shown.includes(row), `the dice view leaves out "${row}"`)
   }
+})
+
+test('the dice view keeps its back hint and each roll whole at 40 columns', installedPackageTest, async () => {
+  const { form } = await openMadLibsForm()
+
+  openDiceView(form)
+  const lines = form.render(40)
+
+  assert.match(lines.join(' '), /Enter\/Esc: back to the form/)
+  assert.deepEqual(lines.filter((line) => line.startsWith('·')), [])
 })
 
 for (const key of ['enter', 'escape']) {

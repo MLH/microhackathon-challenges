@@ -14,7 +14,7 @@ blanks opens once you finish, and one asking them to keep secrets and personal
 details out of their answers. The form shows its keys and its Roll dice
 tables, so don't explain them. Then end your turn, so the form can open.
 
-If the form doesn't open, they can type the whole sentence instead:
+If they say the form didn't open, give them this sentence to type:
 
 > Build a [Theme] about [Subject] for [Audience] in [Style] style.
 

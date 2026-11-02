@@ -3,7 +3,7 @@
 // participant's message. Its Roll dice view shows the dice sheet's tables.
 // Typing the sentence in Pi's editor works without it.
 
-import { Input, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
+import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
 
 import { readDiceTables } from './dice.mjs'
 import { FIELDS, PROMPT_TEMPLATE, assemblePrompt, fillSentence, findBlankField, hasUnfilledBlank, isFinishedPrompt } from './prompt.mjs'
@@ -30,19 +30,27 @@ function promptAlreadySent(ctx) {
     && textParts(entry.message.content).some(isFinishedPrompt))
 }
 
-/** Joins words with no-break spaces, so wrapping never splits them. */
-const keepTogether = (text) => text.replaceAll(' ', '\u00a0')
-
 /**
- * One line per dice table, such as `Theme (d6): 1 Dashboard · 2 Game · …`,
- * each roll kept on one line with its option.
+ * Draws one dice table as `Theme (d6): 1 Dashboard · 2 Game · …`, wrapped
+ * to `width` between rolls, so a roll stays whole with the separator after
+ * it. pi-tui's wrapping can't do this: it breaks at no-break spaces too.
  */
-function diceLines(diceTables) {
-  return diceTables.map(({ field, die, options }) => {
-    const rolls = options.map((option, index) => keepTogether(`${index + 1} ${option}`))
+function diceTableLines({ field, die, options }, width) {
+  const pieces = options.map((option, index) => `${index + 1} ${option}${index < options.length - 1 ? ' ·' : ''}`)
+  const lines = []
+  let line = `${field.label} (${die}):`
+  for (const piece of pieces) {
+    if (visibleWidth(`${line} ${piece}`) <= width) {
+      line = `${line} ${piece}`
+      continue
+    }
 
-    return `${field.label} (${die}): ${rolls.join(' · ')}`
-  })
+    lines.push(line)
+    line = piece
+  }
+  lines.push(line)
+
+  return lines.map((text) => truncateToWidth(text, width))
 }
 
 /**
@@ -103,14 +111,16 @@ function createForm({ tui, theme, keybindings, draft, diceTables, done }) {
     tui.requestRender()
   }
 
-  /** Draws the dice tables, wrapped to `width`, with how to go back. */
+  /** Draws the dice tables, wrapped to `width`, with how to go back first. */
   function renderDice(width) {
     const wrapWidth = Math.max(1, width)
+    const wrap = (text) => wrapTextWithAnsi(text, wrapWidth)
 
     return [
-      truncateToWidth(theme.fg('accent', theme.bold('Roll the dice')), wrapWidth),
-      truncateToWidth(theme.fg('muted', 'Type each roll\'s option into its blank, or invent your own.   Enter/Esc: back to the form'), wrapWidth),
-      ...diceLines(diceTables).flatMap((line) => wrapTextWithAnsi(line, wrapWidth)),
+      ...wrap(theme.fg('accent', theme.bold('Roll dice'))),
+      ...wrap(theme.fg('muted', 'Enter/Esc: back to the form')),
+      ...wrap(theme.fg('muted', 'Type each roll\'s option into its blank, or invent your own.')),
+      ...diceTables.flatMap((table) => diceTableLines(table, wrapWidth)),
     ]
   }
 
