@@ -42,6 +42,7 @@ const toSkyButton = document.getElementById('to-sky-button')
 const drawAgainButton = document.getElementById('draw-again-button')
 const sky = document.getElementById('sky')
 
+// The starting prompt is written once, in index.html, and read back here.
 const INITIAL_PROMPT = statusLine.textContent
 const DRAWN_PROMPT = 'Looking good! Press Save my bird when it’s done.'
 
@@ -294,7 +295,7 @@ function showDraw() {
   skyMode.hidden = true
   drawMode.hidden = false
   sky.replaceChildren()
-  setStatus(INITIAL_PROMPT)
+  setStatus(isCanvasBlank() ? INITIAL_PROMPT : DRAWN_PROMPT)
   toSkyButton.hidden = flight.entry === undefined
 }
 

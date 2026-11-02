@@ -54,8 +54,7 @@ Tell them to draw any bird, then press **Save my bird**; always call the
 button that. Saving tells you on its own, as a `[birdsbirdbirds]` message. If
 they say they saved but no message came, use `bash` to check that `bird.png`
 exists in the current directory; if it doesn't, ask them to press **Save my
-bird** and look again. When it exists, go on to
-step 2.
+bird** and look again. When it exists, go on to step 2.
 
 ## 2. Meet the bird
 
@@ -149,5 +148,4 @@ On a no, move on without publishing.
 
 Report `fly`. With `report_step`, end with the finish line, naming the
 points: "All steps are done. Press Enter, or choose Finish, to claim your 150
-pts." Finish closes the page and clears the bird, so don't invite them to
-keep watching it.
+pts." Finish closes the page, so don't invite them to keep watching it.
