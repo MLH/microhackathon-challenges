@@ -112,7 +112,11 @@ version:
 | Auth | `bearer`, token `SENTRY_AUTH_TOKEN` |
 | Host | `sentry.io` |
 
-The token needs the `event:read`, `project:read`, and `org:read` scopes. The
+The token needs the `event:read`, `project:read`, and `org:read` scopes, in
+the org the game reports to. Make it with an internal integration under
+**Settings > Custom Integrations** in that org, with Project, Issue & Event,
+and Organization set to Read. An organization token won't do: its scopes are
+fixed for CI and lack these. A token from another org gets `403`. The
 station also needs a boothstrap that sets each `vault_services` credential in
 the challenge's hooks. Release `0.1.0` predates that, so on it the challenge gets
 no token and runs in demo mode.
