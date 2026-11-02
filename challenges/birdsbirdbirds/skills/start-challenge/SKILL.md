@@ -38,11 +38,8 @@ only because someone asks: its condition must hold.
 
 Open the drawing page right away, as your first action once the challenge
 starts (after `session_info`, when you have it): call `show_preview` with
-`http://127.0.0.1:4322/` without asking first. When its `outcome` is
-`offered`, tell them to click Open preview to see the drawing page; nothing
-is open yet, so never say it is. When it is `navigated`, say the page is
-showing in Chrome beside the station. Without `show_preview`, or when it
-fails, give them that URL to open right away.
+`http://127.0.0.1:4322/` without asking first. Without `show_preview`, give
+them that URL to open right away.
 
 When you resume with `draw-bird` not yet complete, first use `bash` to check
 whether `bird.png` exists in the current directory: a save made just before
@@ -114,8 +111,8 @@ checker or edit it. When it passes, report `animate`.
 
 The drawing page switches to the sky on its own once a valid `bird.json`
 exists. Tell the participant to look at it (call `show_preview` again if the
-page was closed, and on `offered` tell them to click Open preview). They
-can press "Draw again" to redraw; if they do, start again at step 1.
+page was closed). They can press "Draw again" to redraw; if they do, start
+again at step 1.
 
 Ask how the flight looks and offer one tweak, such as faster, higher, or
 more wobbly. If they want it, edit `bird.json`, rerun the checker, and let
