@@ -1,12 +1,16 @@
 /**
  * Player input: keyboard and on-screen controls feed one shared {@link InputState}. Holding a pad
- * button works with a pointer; pressing it with Enter or Space gives a short pulse, so a keyboard
- * user can drive the pads too.
+ * button works with a pointer, and a tap on a move pad carries the ship one lane; pressing it with
+ * Enter or Space gives a short pulse, so a keyboard user can drive the pads too.
  */
+import { ENEMY_GAP_X, ENEMY_WIDTH, PLAYER_SPEED } from '../engine/constants.mjs';
 import { idleInput } from '../engine/world.mjs';
 
 /** How long a keyboard activation of a pad button counts as held. */
 const PAD_PULSE_MS = 180;
+
+/** A tap on a move pad holds long enough to carry the ship one enemy-formation lane. */
+export const TAP_MOVE_MS = Math.round(((ENEMY_WIDTH + ENEMY_GAP_X) / PLAYER_SPEED) * 1000);
 
 /** The keys that mean each control. */
 const KEY_CONTROLS = new Map([
@@ -72,6 +76,9 @@ export class InputController {
       event.preventDefault();
       this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
       this.recompute();
+      if (control !== 'fire') {
+        this.pulse(control, TAP_MOVE_MS);
+      }
     };
     const release = () => {
       const holds = this.padsDown.get(control) ?? 0;
@@ -93,8 +100,8 @@ export class InputController {
     });
   }
 
-  /** Hold `control` briefly. */
-  pulse(control) {
+  /** Hold `control` for `durationMs`. */
+  pulse(control, durationMs = PAD_PULSE_MS) {
     this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
     this.recompute();
     const timer = setTimeout(() => {
@@ -102,7 +109,7 @@ export class InputController {
       const holds = this.padsDown.get(control) ?? 0;
       this.padsDown.set(control, Math.max(0, holds - 1));
       this.recompute();
-    }, PAD_PULSE_MS);
+    }, durationMs);
     this.pulseTimers.add(timer);
   }
 

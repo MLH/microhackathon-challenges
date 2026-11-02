@@ -32,7 +32,8 @@ browser ES modules.
 The game shows a `glitch-state v1` line, and the headless monitor reports
 `launch-game`, `fix-weapon`, `fix-shield`, and `fix-boss` from it, as
 [monitor/SKILL.md](monitor/SKILL.md) describes. The game also saves
-`glitch-progress.json` in the workspace so Pi can see which bug and stage
+`glitch-progress.json` in the workspace (`setup` seeds it with an unplayed run,
+so Pi's first read succeeds) so Pi can see which bug and stage
 (`unseen`, `encountered`, `investigated`, `repaired`) the participant is on and
 emit non-PII milestone events. Once all three bugs are `repaired`, Pi asks
 which clue helped most and reports `debrief`.

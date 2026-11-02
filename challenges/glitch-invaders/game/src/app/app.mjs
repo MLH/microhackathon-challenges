@@ -22,7 +22,7 @@ import { GameLoop } from './game-loop.mjs';
 import { canonicalEncounter, codeForProgress, firstOpenBug, waveForBug } from './resume.mjs';
 
 /** How long the banner after a success or patch stays up. */
-const BANNER_MS = 6_000;
+const BANNER_MS = 2_500;
 
 /** The pause after the last repair, so the participant sees the result before the recap. */
 const COMPLETION_DELAY_MS = 1_800;
@@ -349,7 +349,7 @@ export class GameApp {
     this.overlays.show(this.incidentConsole.element);
     const cached = this.evidenceByBug.get(bug);
     if (cached !== undefined) {
-      this.incidentConsole.showEvidence(cached);
+      this.deliverEvidence(cached);
 
       return;
     }
@@ -364,6 +364,9 @@ export class GameApp {
   /** Remember the evidence and show it if its console is still open. */
   deliverEvidence(evidence) {
     this.evidenceByBug.set(evidence.bug, evidence);
+    if (this.live !== null) {
+      this.hud.showEvidenceSource(evidence);
+    }
     this.incidentConsole.showEvidence(evidence);
   }
 

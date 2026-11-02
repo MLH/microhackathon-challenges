@@ -30,6 +30,20 @@ export function setText(element, text) {
   }
 }
 
+/** Set a `data-` attribute only when it changed; a same-value write still queues a DOM mutation. */
+export function setData(element, name, value) {
+  if (element.dataset[name] !== value) {
+    element.dataset[name] = value;
+  }
+}
+
+/** Set one inline style property only when it changed, so per-frame updates do not churn the DOM. */
+export function setStyle(element, property, value) {
+  if (element.style[property] !== value) {
+    element.style[property] = value;
+  }
+}
+
 /** Add a click handler and return the element, for chaining inside {@link h} calls. */
 export function onClick(element, handler) {
   element.addEventListener('click', handler);

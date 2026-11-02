@@ -11,12 +11,12 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, request } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -40,6 +40,9 @@ import {
   FALLBACK_NOTES,
   LiveEvidenceProvider,
 } from '../challenges/glitch-invaders/game/src/diagnostics/live-evidence.mjs';
+import { InputController, TAP_MOVE_MS } from '../challenges/glitch-invaders/game/src/ui/input.mjs';
+import { Hud } from '../challenges/glitch-invaders/game/src/ui/hud.mjs';
+import { BossLoadingView } from '../challenges/glitch-invaders/game/src/ui/boss-loading.mjs';
 import { SimulatedEvidenceProvider } from '../challenges/glitch-invaders/game/src/diagnostics/simulated-evidence.mjs';
 import {
   BOSS_SPAWN_BUDGET_MS,
@@ -913,6 +916,17 @@ test('the shipped setup and cleanup hooks start and stop the server and clean up
   assert.equal(existsSync(path.join(workspace, '.glitch')), false);
 });
 
+test('setup leaves an unplayed progress file the guide can read and the game treats as a new run', async (testContext) => {
+  const stack = await startStack(testContext);
+
+  const stored = JSON.parse(await readFile(stack.paths.progressFile, 'utf8'));
+  const served = await (await fetch(`${stack.url}api/progress`)).json();
+
+  assert.deepEqual(stored, createProgress(stack.attemptId));
+  assert.deepEqual(served, stored);
+  assert.equal(stored.launched, false);
+});
+
 test('the page server sends the CSP on the page and on an error response', async (testContext) => {
   const stack = await startStack(testContext);
 
@@ -945,6 +959,62 @@ test('the game page has no inline styles or inline scripts for the CSP to block'
   assert.doesNotMatch(page, /\son[a-z]+=/);
 });
 
+/**
+ * The declarations of the top-level rule whose selector is exactly `selector` in `stylesheet`, as a
+ * property-to-value map; rules inside at-rule blocks such as `@media` are skipped.
+ * @throws {Error} when the stylesheet has no such rule.
+ */
+function topLevelCssRule(stylesheet, selector) {
+  const source = stylesheet.replace(/\/\*[\s\S]*?\*\//g, '');
+  let depth = 0;
+  let ruleStart = 0;
+  let ruleSelector = '';
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === '{') {
+      if (depth === 0) {
+        ruleSelector = source.slice(ruleStart, index).trim();
+        ruleStart = index + 1;
+      }
+      depth += 1;
+    } else if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        if (ruleSelector === selector) {
+          return new Map(
+            source
+              .slice(ruleStart, index)
+              .split(';')
+              .filter((declaration) => declaration.includes(':'))
+              .map((declaration) => {
+                const [property, ...value] = declaration.split(':');
+
+                return [property.trim(), value.join(':').trim()];
+              }),
+          );
+        }
+        ruleStart = index + 1;
+      }
+    }
+  }
+
+  throw new Error(`the stylesheet has no top-level rule for ${selector}`);
+}
+
+test('the Incident Console scrolls its content inside the viewport and keeps its actions pinned below', async () => {
+  const stylesheet = await readFile(
+    path.join(packageDirectory, 'game', 'src', 'styles.css'),
+    'utf8',
+  );
+
+  const rule = (selector) => topLevelCssRule(stylesheet, selector);
+
+  assert.equal(rule('.overlay-root').get('grid-template'), 'minmax(0, 1fr) / minmax(0, 1fr)');
+  assert.equal(rule('.console').get('max-height'), '100%');
+  assert.equal(rule('.pane').get('overflow'), undefined);
+  assert.equal(rule('.pane-scroll').get('overflow'), 'auto');
+  assert.equal(rule('.pane-actions').get('flex'), 'none');
+});
+
 for (const requestPath of [
   '/%2e%2e/challenge.json',
   '/%2e%2e/server/setup.mjs',
@@ -975,7 +1045,10 @@ test('the page server answers 400 for a progress PUT that is not JSON and stores
   const response = await putProgressTo(stack.url, '{"launched": tru');
 
   assert.equal(response.status, 400);
-  assert.equal(existsSync(stack.paths.progressFile), false);
+  assert.deepEqual(
+    JSON.parse(await readFile(stack.paths.progressFile, 'utf8')),
+    createProgress(stack.attemptId),
+  );
 });
 
 test('the page server answers 413 for a streamed progress body over the cap and stores nothing', async (testContext) => {
@@ -998,13 +1071,17 @@ test('the page server answers 413 for a streamed progress body over the cap and 
   });
 
   assert.equal(response.status, 413);
-  assert.equal(existsSync(stack.paths.progressFile), false);
+  assert.deepEqual(
+    JSON.parse(await readFile(stack.paths.progressFile, 'utf8')),
+    createProgress(stack.attemptId),
+  );
 });
 
 test('the page server refuses a symlinked progress file with 422 and leaves its target untouched', async (testContext) => {
   const stack = await startStack(testContext);
   const outside = path.join(await makeTemporaryDirectory(testContext), 'outside.json');
   await writeFile(outside, 'outside secret');
+  await rm(stack.paths.progressFile);
   await symlink(outside, stack.paths.progressFile);
   const progress = createProgress(stack.attemptId);
 
@@ -1139,7 +1216,7 @@ test('setup exits 0 and clears a directory planted at the progress path', async 
   const setup = await runHook('setup', hookEnvironment(workspace, port));
 
   assert.equal(setup.code, 0, setup.stderr);
-  assert.equal(existsSync(progressPath), false);
+  assert.equal((await lstat(progressPath)).isFile(), true);
 });
 
 test('setup refuses a symlinked .glitch directory and leaves the outside directory untouched', async (testContext) => {
@@ -1699,4 +1776,200 @@ test('the evidence lookup shares one Sentry lookup among concurrent requests for
       ['shield', SHIELD_EVENT_ID, true],
     ],
   );
+});
+
+/** A DOM element stand-in that records every write the page code makes to it. */
+class RecordingElement {
+  writes = [];
+  hidden = false;
+  #textContent = '';
+  dataset;
+  style;
+
+  constructor() {
+    this.dataset = this.#recordingBag('dataset');
+    this.style = this.#recordingBag('style');
+  }
+
+  get textContent() {
+    return this.#textContent;
+  }
+
+  set textContent(text) {
+    this.writes.push(`textContent=${text}`);
+    this.#textContent = text;
+  }
+
+  setAttribute() {}
+
+  append() {}
+
+  replaceChildren() {}
+
+  #recordingBag(label) {
+    const values = {};
+
+    return new Proxy(values, {
+      set: (target, name, value) => {
+        this.writes.push(`${label}.${name}=${value}`);
+        target[name] = value;
+
+        return true;
+      },
+    });
+  }
+}
+
+/** Run `body` with a page whose elements are {@link RecordingElement}s, by id as the HUD asks. */
+function withRecordingPage(body) {
+  const elements = new Map();
+  const page = {
+    getElementById: (id) => {
+      if (!elements.has(id)) {
+        elements.set(id, new RecordingElement());
+      }
+
+      return elements.get(id);
+    },
+    createElement: () => new RecordingElement(),
+  };
+  const original = globalThis.document;
+  globalThis.document = page;
+  try {
+    return body(page);
+  } finally {
+    globalThis.document = original;
+  }
+}
+
+/** The arena state the HUD reads, with a default for every field. */
+function hudWorld(overrides = {}) {
+  return {
+    phase: 'playing',
+    wave: 1,
+    verifying: null,
+    kills: 0,
+    pickups: [],
+    player: { hull: 3, restoreAt: null, shield: false, weapon: 'single' },
+    ...overrides,
+  };
+}
+
+test('an idle frame writes nothing to the HUD, so the station sees the page go quiet', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const progress = createProgress('attempt', 'demo');
+    const world = hudWorld();
+    hud.update(progress, world);
+    const shield = page.getElementById('stat-shield');
+    const elements = ['stat-hull', 'stat-shield', 'stat-kills', 'stat-score', 'objective-text', 'incidents'].map(
+      (id) => page.getElementById(id),
+    );
+    for (const element of elements) {
+      element.writes.length = 0;
+    }
+
+    hud.update(progress, world);
+
+    assert.deepEqual(shield.writes, []);
+    assert.deepEqual(elements.flatMap((element) => element.writes), []);
+  });
+});
+
+test('an idle frame writes nothing to the boss loading panel', () => {
+  withRecordingPage(() => {
+    const panel = new RecordingElement();
+    const view = new BossLoadingView(panel);
+    const world = hudWorld({
+      phase: 'boss-loading',
+      bossLoad: { startedAt: 0, tasks: [{ name: 'textures', startMs: 0, endMs: null }] },
+    });
+    view.update(world, 500);
+    const recorded = [view.clock, view.note, view.rows.get('textures').fill, view.rows.get('textures').status];
+    for (const element of recorded) {
+      element.writes.length = 0;
+    }
+
+    view.update(world, 500);
+
+    assert.deepEqual(recorded.flatMap((element) => element.writes), []);
+  });
+});
+
+test('the HUD badge says LIVE until a report falls back, then SIMULATED, then LIVE again on live evidence', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const badge = page.getElementById('mode-badge');
+    hud.showLiveMode();
+    assert.equal(badge.textContent, 'LIVE · Sentry');
+
+    hud.showEvidenceSource({ source: 'fallback' });
+    assert.match(badge.textContent, /^SIMULATED/);
+    assert.equal(badge.dataset.mode, 'simulated');
+
+    hud.showEvidenceSource({ source: 'live' });
+    assert.equal(badge.textContent, 'LIVE · Sentry');
+    assert.equal(badge.dataset.mode, 'live');
+  });
+});
+
+test('a quick tap on a move pad carries the ship a lane, and fire stays a plain hold', (testContext) => {
+  testContext.mock.timers.enable({ apis: ['setTimeout'] });
+  const input = new InputController({ isGameActive: () => true, onPauseKey: () => {} });
+  const listeners = new Map();
+  const pad = (control) => {
+    const button = { addEventListener: (name, listener) => listeners.set(`${control}:${name}`, listener) };
+    input.attachPad(control, button);
+  };
+  pad('left');
+  pad('fire');
+  const event = { preventDefault: () => {} };
+
+  listeners.get('left:pointerdown')(event);
+  listeners.get('left:pointerup')(event);
+  const heldRightAfterTap = input.current().left;
+  testContext.mock.timers.tick(TAP_MOVE_MS - 1);
+  const heldJustBeforeLaneEnd = input.current().left;
+  testContext.mock.timers.tick(1);
+  listeners.get('fire:pointerdown')(event);
+  listeners.get('fire:pointerup')(event);
+
+  assert.equal(heldRightAfterTap, true);
+  assert.equal(heldJustBeforeLaneEnd, true);
+  assert.equal(input.current().left, false);
+  assert.equal(input.current().fire, false);
+  assert.ok(TAP_MOVE_MS >= 150, `a tap must move well beyond 25 px, got ${TAP_MOVE_MS} ms`);
+});
+
+test('the monitor state line is visually hidden but still in the accessibility tree', async () => {
+  const page = await readFile(path.join(packageDirectory, 'game', 'index.html'), 'utf8');
+  const stylesheet = await readFile(path.join(packageDirectory, 'game', 'src', 'styles.css'), 'utf8');
+
+  assert.match(page, /<p id="boothstrap-state" class="visually-hidden">glitch-state v1 /);
+  assert.doesNotMatch(page, /id="boothstrap-state"[^>]*(hidden=|aria-hidden|style=)/);
+  assert.doesNotMatch(stylesheet, /state-line/);
+  const rule = topLevelCssRule(stylesheet, '.visually-hidden');
+  assert.equal(rule.get('position'), 'absolute');
+  assert.equal(rule.get('width'), '1px');
+  for (const forbidden of ['display', 'visibility', 'font-size']) {
+    assert.equal(rule.has(forbidden), false);
+  }
+});
+
+test('toasts sit at the top of the arena so they never cover the ship or pickups', async () => {
+  const stylesheet = await readFile(path.join(packageDirectory, 'game', 'src', 'styles.css'), 'utf8');
+
+  const rule = topLevelCssRule(stylesheet, '.banner');
+
+  assert.equal(rule.get('top'), '10px');
+  assert.equal(rule.has('bottom'), false);
+});
+
+test('the completion card tells the participant the last step is with Pi', async () => {
+  const overlays = await readFile(
+    path.join(packageDirectory, 'game', 'src', 'ui', 'overlays.mjs'),
+    'utf8',
+  );
+
+  assert.match(overlays, /'Last step: tell Pi which clue helped most\.'/);
 });

@@ -5,7 +5,7 @@
 import { ALL_LOAD_TASKS } from '../boss/boss-loader.mjs';
 import { BOSS_SPAWN_BUDGET_MS } from '../engine/constants.mjs';
 
-import { h, setText } from './dom.mjs';
+import { h, setData, setStyle, setText } from './dom.mjs';
 
 /** Draws the loading panel from the world. */
 export class BossLoadingView {
@@ -48,7 +48,7 @@ export class BossLoadingView {
           ? `Buffering… over the ${(BOSS_SPAWN_BUDGET_MS / 1_000).toFixed(1)} s budget`
           : 'Loading resources',
       );
-      this.note.dataset.over = String(elapsed > BOSS_SPAWN_BUDGET_MS);
+      setData(this.note, 'over', String(elapsed > BOSS_SPAWN_BUDGET_MS));
     }
     for (const task of load.tasks) {
       const row = this.rows.get(task.name);
@@ -61,7 +61,7 @@ export class BossLoadingView {
           : task.startMs === null
             ? 0
             : Math.min(1, (elapsed - task.startMs) / row.durationMs);
-      row.fill.style.width = `${(fraction * 100).toFixed(1)}%`;
+      setStyle(row.fill, 'width', `${(fraction * 100).toFixed(1)}%`);
       setText(
         row.status,
         task.endMs !== null ? '✓ done' : task.startMs === null ? 'waiting' : 'loading',

@@ -1,12 +1,14 @@
 /**
  * Setup: prepare a clean attempt and start the page server. Deterministic and fast: it decides live
- * or demo mode, writes a fresh runtime config, serves the game in the background, and exits 0 only
+ * or demo mode, writes a fresh runtime config and an unplayed progress file (so the guide's first
+ * read of it succeeds), serves the game in the background, and exits 0 only
  * once the server answers, so Chrome never opens an unready page.
  */
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { createProgress } from '../shared/progress.mjs';
 import { stopServer } from './cleanup.mjs';
 import { resolveStatePaths } from './paths.mjs';
 import { decideMode } from './sentry-config.mjs';
@@ -96,6 +98,8 @@ export async function runSetup(env, cwd) {
     ...(mode.sentry === null ? {} : { sentry: mode.sentry }),
   };
   await writeWorkspaceFile(paths.runtimeConfigFile, `${JSON.stringify(config, null, 2)}\n`);
+  const freshProgress = createProgress(config.attemptId, mode.sentry === null ? 'demo' : 'live');
+  await writeWorkspaceFile(paths.progressFile, `${JSON.stringify(freshProgress, null, 2)}\n`);
 
   const port = resolvePort(env);
   const serverPid = await startServer(paths, port, env);

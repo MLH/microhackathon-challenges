@@ -95,6 +95,7 @@ body {
   display: grid;
   flex: 1 1 auto;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -102,6 +103,7 @@ body {
   position: relative;
   z-index: 20;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 20px;
   padding: 8px 16px;
@@ -201,9 +203,10 @@ body {
 
 .banner {
   position: absolute;
+  top: 10px;
   right: 10px;
-  bottom: 10px;
   left: 10px;
+  pointer-events: none;
   padding: 10px 14px;
   border: 2px solid var(--accent);
   background: var(--surface);
@@ -426,11 +429,16 @@ body {
   gap: 12px;
 }
 
+/* The overlay spans the rows below the topbar, and its single track is bounded so a card's
+   `max-height: 100%` resolves against the space actually left on screen. */
 .overlay-root {
   position: absolute;
   inset: 0;
   z-index: 10;
   display: grid;
+  grid-row: 2 / -1;
+  grid-column: 1;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   padding: 16px;
   background: rgb(21 23 28 / 0.88);
@@ -450,6 +458,11 @@ body {
 
 .hero {
   font-size: 30px;
+  font-weight: 700;
+}
+
+.last-step {
+  color: var(--mlh-yellow);
   font-weight: 700;
 }
 
@@ -629,11 +642,21 @@ kbd {
   flex: 1;
   flex-direction: column;
   min-height: 0;
-  padding: 12px 2px 2px;
-  overflow: auto;
+  padding-top: 12px;
 }
 
-.pane > * + *,
+/* The bottom padding sits under the fade, so the last line is fully visible once scrolled to. */
+.pane-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 2px 2px 20px;
+  overflow: auto;
+  scroll-padding-bottom: 20px;
+  scrollbar-color: var(--border) transparent;
+  scrollbar-width: thin;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 20px), transparent);
+}
+
 .evidence > * + *,
 .diagnose > * + *,
 .patches > * + * {
@@ -923,15 +946,20 @@ kbd {
 
 .pane-actions {
   display: flex;
+  flex: none;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 10px 12px;
   align-items: center;
-  margin-top: auto;
-  padding-top: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
 }
 
-.spacer {
-  flex: 1;
+.pane-actions > .feedback {
+  flex: 1 0 100%;
+}
+
+.pane-actions > .button-primary {
+  margin-left: auto;
 }
 
 .text-link {
@@ -1093,6 +1121,12 @@ kbd {
   font: 12px / 1.35 var(--mono);
 }
 
+@media (max-width: 880px) {
+  .badge {
+    display: none;
+  }
+}
+
 @media (max-width: 720px) {
   .dock {
     grid-template-columns: 1fr;
@@ -1106,15 +1140,28 @@ kbd {
   .stats {
     gap: 10px;
   }
-
-  .badge {
-    display: none;
-  }
 }
 
 @media (max-height: 620px) {
   .objective-detail {
     display: none;
+  }
+
+  .overlay-root {
+    padding: 8px 16px;
+  }
+
+  .overlay-card {
+    padding: 20px 24px 14px;
+  }
+
+  .overlay-card > * + * {
+    margin-top: 10px;
+  }
+
+  .overlay-card .button-large {
+    min-height: 44px;
+    padding: 8px 20px;
   }
 }
 
