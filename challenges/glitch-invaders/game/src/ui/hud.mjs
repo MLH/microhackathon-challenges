@@ -1,6 +1,6 @@
 import { BUG_DEFINITIONS, BUG_ORDER } from '../bugs/bug-definitions.mjs';
 
-import { h, replaceChildren, setText } from './dom.mjs';
+import { h, replaceChildren, setData, setText } from './dom.mjs';
 import { currentObjective } from './objective.mjs';
 
 /** The glyph and word that show a failure's stage; never color alone. */
@@ -33,11 +33,24 @@ export class Hud {
   incidents = requireElement('incidents');
   chipSignature = '';
 
-  /** Swap the page's demo badge for the live one; it never changes during a run. */
+  /** Swap the page's demo badge for the live one, until a report falls back to simulated evidence. */
   showLiveMode() {
-    this.badge.dataset.mode = 'live';
+    setData(this.badge, 'mode', 'live');
     setText(this.badge, 'LIVE · Sentry');
     this.badge.title = 'Live mode: the failures are reported to Sentry and the evidence is its record.';
+  }
+
+  /** Show the badge the evidence's source calls for, so it never says LIVE beside simulated evidence. */
+  showEvidenceSource(evidence) {
+    if (evidence.source === 'fallback') {
+      setData(this.badge, 'mode', 'simulated');
+      setText(this.badge, 'SIMULATED · Sentry unavailable');
+      this.badge.title = 'Sentry evidence was unavailable, so the latest evidence is simulated.';
+
+      return;
+    }
+
+    this.showLiveMode();
   }
 
   /** Refresh every stat from the latest world and progress. */
@@ -45,7 +58,7 @@ export class Hud {
     const hullText = world.player.restoreAt === null ? '♥'.repeat(world.player.hull) : '✖';
     setText(this.hull, hullText === '' ? '✖' : hullText);
     setText(this.shield, world.player.shield ? 'ON' : 'off');
-    this.shield.dataset.state = world.player.shield ? 'on' : 'off';
+    setData(this.shield, 'state', world.player.shield ? 'on' : 'off');
     setText(this.kills, String(world.kills));
     setText(this.score, String(progress.score));
 

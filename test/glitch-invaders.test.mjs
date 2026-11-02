@@ -11,12 +11,12 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer as createHttpServer, request } from 'node:http';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
@@ -40,6 +40,11 @@ import {
   FALLBACK_NOTES,
   LiveEvidenceProvider,
 } from '../challenges/glitch-invaders/game/src/diagnostics/live-evidence.mjs';
+import { InputController, TAP_MOVE_MS } from '../challenges/glitch-invaders/game/src/ui/input.mjs';
+import { IncidentConsole } from '../challenges/glitch-invaders/game/src/ui/incident-console.mjs';
+import { completionCard } from '../challenges/glitch-invaders/game/src/ui/overlays.mjs';
+import { Hud } from '../challenges/glitch-invaders/game/src/ui/hud.mjs';
+import { BossLoadingView } from '../challenges/glitch-invaders/game/src/ui/boss-loading.mjs';
 import { SimulatedEvidenceProvider } from '../challenges/glitch-invaders/game/src/diagnostics/simulated-evidence.mjs';
 import {
   BOSS_SPAWN_BUDGET_MS,
@@ -913,6 +918,17 @@ test('the shipped setup and cleanup hooks start and stop the server and clean up
   assert.equal(existsSync(path.join(workspace, '.glitch')), false);
 });
 
+test('setup leaves an unplayed progress file the guide can read and the game treats as a new run', async (testContext) => {
+  const stack = await startStack(testContext);
+
+  const stored = JSON.parse(await readFile(stack.paths.progressFile, 'utf8'));
+  const served = await (await fetch(`${stack.url}api/progress`)).json();
+
+  assert.deepEqual(stored, createProgress(stack.attemptId));
+  assert.deepEqual(served, stored);
+  assert.equal(stored.launched, false);
+});
+
 test('the page server sends the CSP on the page and on an error response', async (testContext) => {
   const stack = await startStack(testContext);
 
@@ -945,6 +961,62 @@ test('the game page has no inline styles or inline scripts for the CSP to block'
   assert.doesNotMatch(page, /\son[a-z]+=/);
 });
 
+/**
+ * The declarations of the top-level rule whose selector is exactly `selector` in `stylesheet`, as a
+ * property-to-value map; rules inside at-rule blocks such as `@media` are skipped.
+ * @throws {Error} when the stylesheet has no such rule.
+ */
+function topLevelCssRule(stylesheet, selector) {
+  const source = stylesheet.replace(/\/\*[\s\S]*?\*\//g, '');
+  let depth = 0;
+  let ruleStart = 0;
+  let ruleSelector = '';
+  for (let index = 0; index < source.length; index += 1) {
+    if (source[index] === '{') {
+      if (depth === 0) {
+        ruleSelector = source.slice(ruleStart, index).trim();
+        ruleStart = index + 1;
+      }
+      depth += 1;
+    } else if (source[index] === '}') {
+      depth -= 1;
+      if (depth === 0) {
+        if (ruleSelector === selector) {
+          return new Map(
+            source
+              .slice(ruleStart, index)
+              .split(';')
+              .filter((declaration) => declaration.includes(':'))
+              .map((declaration) => {
+                const [property, ...value] = declaration.split(':');
+
+                return [property.trim(), value.join(':').trim()];
+              }),
+          );
+        }
+        ruleStart = index + 1;
+      }
+    }
+  }
+
+  throw new Error(`the stylesheet has no top-level rule for ${selector}`);
+}
+
+test('the Incident Console scrolls its content inside the viewport and keeps its actions pinned below', async () => {
+  const stylesheet = await readFile(
+    path.join(packageDirectory, 'game', 'src', 'styles.css'),
+    'utf8',
+  );
+
+  const rule = (selector) => topLevelCssRule(stylesheet, selector);
+
+  assert.equal(rule('.overlay-root').get('grid-template'), 'minmax(0, 1fr) / minmax(0, 1fr)');
+  assert.equal(rule('.console').get('max-height'), '100%');
+  assert.equal(rule('.pane').get('overflow'), undefined);
+  assert.equal(rule('.pane-scroll').get('overflow'), 'auto');
+  assert.equal(rule('.pane-actions').get('flex'), 'none');
+});
+
 for (const requestPath of [
   '/%2e%2e/challenge.json',
   '/%2e%2e/server/setup.mjs',
@@ -975,7 +1047,10 @@ test('the page server answers 400 for a progress PUT that is not JSON and stores
   const response = await putProgressTo(stack.url, '{"launched": tru');
 
   assert.equal(response.status, 400);
-  assert.equal(existsSync(stack.paths.progressFile), false);
+  assert.deepEqual(
+    JSON.parse(await readFile(stack.paths.progressFile, 'utf8')),
+    createProgress(stack.attemptId),
+  );
 });
 
 test('the page server answers 413 for a streamed progress body over the cap and stores nothing', async (testContext) => {
@@ -998,13 +1073,17 @@ test('the page server answers 413 for a streamed progress body over the cap and 
   });
 
   assert.equal(response.status, 413);
-  assert.equal(existsSync(stack.paths.progressFile), false);
+  assert.deepEqual(
+    JSON.parse(await readFile(stack.paths.progressFile, 'utf8')),
+    createProgress(stack.attemptId),
+  );
 });
 
 test('the page server refuses a symlinked progress file with 422 and leaves its target untouched', async (testContext) => {
   const stack = await startStack(testContext);
   const outside = path.join(await makeTemporaryDirectory(testContext), 'outside.json');
   await writeFile(outside, 'outside secret');
+  await rm(stack.paths.progressFile);
   await symlink(outside, stack.paths.progressFile);
   const progress = createProgress(stack.attemptId);
 
@@ -1139,7 +1218,7 @@ test('setup exits 0 and clears a directory planted at the progress path', async 
   const setup = await runHook('setup', hookEnvironment(workspace, port));
 
   assert.equal(setup.code, 0, setup.stderr);
-  assert.equal(existsSync(progressPath), false);
+  assert.equal((await lstat(progressPath)).isFile(), true);
 });
 
 test('setup refuses a symlinked .glitch directory and leaves the outside directory untouched', async (testContext) => {
@@ -1699,4 +1778,429 @@ test('the evidence lookup shares one Sentry lookup among concurrent requests for
       ['shield', SHIELD_EVENT_ID, true],
     ],
   );
+});
+
+/**
+ * A DOM element stand-in that records every write the page code makes to it. It keeps its
+ * children, attributes, and listeners, and reads a style back normalized as a browser does.
+ */
+class RecordingElement {
+  writes = [];
+  hidden = false;
+  children = [];
+  attributes = new Map();
+  listeners = new Map();
+  scrolledIntoView = [];
+  dataset;
+  style;
+
+  constructor() {
+    this.dataset = this.#recordingBag('dataset', (value) => value);
+    this.style = this.#recordingBag('style', normalizedCssValue);
+  }
+
+  get textContent() {
+    return this.children
+      .map((child) => (typeof child === 'string' ? child : child.textContent))
+      .join('');
+  }
+
+  set textContent(text) {
+    this.writes.push(`textContent=${text}`);
+    this.children = [text];
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, value);
+  }
+
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
+
+  append(...children) {
+    this.children.push(...children);
+  }
+
+  replaceChildren(...children) {
+    this.children = children;
+  }
+
+  addEventListener(name, listener) {
+    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+  }
+
+  click() {
+    for (const listener of this.listeners.get('click') ?? []) {
+      listener({ detail: 1 });
+    }
+  }
+
+  scrollIntoView(options) {
+    this.scrolledIntoView.push(options);
+  }
+
+  #recordingBag(label, readBack) {
+    const values = {};
+
+    return new Proxy(values, {
+      set: (target, name, value) => {
+        this.writes.push(`${label}.${name}=${value}`);
+        target[name] = readBack(value);
+
+        return true;
+      },
+    });
+  }
+}
+
+/** A CSS value as a browser reads it back from an inline style: `100.0%` returns as `100%`. */
+function normalizedCssValue(value) {
+  return String(value).replace(/(\d)\.0+(?=\D|$)/g, '$1');
+}
+
+/** The first element in `root`'s tree, `root` included, whose `name` attribute is `value`. */
+function findByAttribute(root, name, value) {
+  if (root.getAttribute(name) === value) {
+    return root;
+  }
+
+  for (const child of root.children) {
+    const found = typeof child === 'string' ? null : findByAttribute(child, name, value);
+    if (found !== null) {
+      return found;
+    }
+  }
+
+  return null;
+}
+
+/** Run `body` with a page whose elements are {@link RecordingElement}s, by id as the HUD asks. */
+function withRecordingPage(body) {
+  const elements = new Map();
+  const page = {
+    getElementById: (id) => {
+      if (!elements.has(id)) {
+        elements.set(id, new RecordingElement());
+      }
+
+      return elements.get(id);
+    },
+    createElement: () => new RecordingElement(),
+  };
+  const original = globalThis.document;
+  globalThis.document = page;
+  try {
+    return body(page);
+  } finally {
+    globalThis.document = original;
+  }
+}
+
+/** The arena state the HUD reads, with a default for every field. */
+function hudWorld(overrides = {}) {
+  return {
+    phase: 'playing',
+    wave: 1,
+    verifying: null,
+    kills: 0,
+    pickups: [],
+    player: { hull: 3, restoreAt: null, shield: false, weapon: 'single' },
+    ...overrides,
+  };
+}
+
+test('an idle frame writes nothing to the HUD, so the station sees the page go quiet', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const progress = createProgress('attempt', 'demo');
+    const world = hudWorld();
+    hud.update(progress, world);
+    const elements = ['stat-hull', 'stat-shield', 'stat-kills', 'stat-score', 'objective-text', 'incidents'].map(
+      (id) => page.getElementById(id),
+    );
+    for (const element of elements) {
+      element.writes.length = 0;
+    }
+
+    hud.update(progress, world);
+
+    assert.deepEqual(elements.flatMap((element) => element.writes), []);
+  });
+});
+
+test('an idle frame writes nothing to the boss loading panel', () => {
+  withRecordingPage(() => {
+    const panel = new RecordingElement();
+    const view = new BossLoadingView(panel);
+    const world = hudWorld({
+      phase: 'boss-loading',
+      bossLoad: { startedAt: 0, tasks: [{ name: 'textures', startMs: 0, endMs: null }] },
+    });
+    view.update(world, 500);
+    const recorded = [view.clock, view.note, view.rows.get('textures').fill, view.rows.get('textures').status];
+    for (const element of recorded) {
+      element.writes.length = 0;
+    }
+
+    view.update(world, 500);
+
+    assert.deepEqual(recorded.flatMap((element) => element.writes), []);
+  });
+});
+
+test('a finished load bar is written once, though the browser reads 100.0% back as 100%', () => {
+  withRecordingPage(() => {
+    const view = new BossLoadingView(new RecordingElement());
+    const world = hudWorld({
+      phase: 'boss-loading',
+      bossLoad: { startedAt: 0, tasks: [{ name: 'textures', startMs: 0, endMs: 400 }] },
+    });
+    view.update(world, 500);
+    const fill = view.rows.get('textures').fill;
+    fill.writes.length = 0;
+
+    view.update(world, 600);
+
+    assert.deepEqual(fill.writes, []);
+  });
+});
+
+test('the HUD badge says LIVE in live mode', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const badge = page.getElementById('mode-badge');
+
+    hud.showLiveMode();
+
+    assert.equal(badge.textContent, 'LIVE · Sentry');
+    assert.equal(badge.dataset.mode, 'live');
+  });
+});
+
+test('the HUD badge says SIMULATED once a live report falls back to simulated evidence', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const badge = page.getElementById('mode-badge');
+    hud.showLiveMode();
+
+    hud.showEvidenceSource({ source: 'fallback' });
+
+    assert.match(badge.textContent, /^SIMULATED/);
+    assert.equal(badge.dataset.mode, 'simulated');
+  });
+});
+
+test('the HUD badge says LIVE again once evidence comes back live from Sentry', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const badge = page.getElementById('mode-badge');
+    hud.showLiveMode();
+    hud.showEvidenceSource({ source: 'fallback' });
+
+    hud.showEvidenceSource({ source: 'live' });
+
+    assert.equal(badge.textContent, 'LIVE · Sentry');
+    assert.equal(badge.dataset.mode, 'live');
+  });
+});
+
+/** An Incident Console on the weapon failure's Diagnose pane, wired to a real tracker as the app is. */
+function consoleOnDiagnosePane() {
+  const tracker = new IncidentTracker(createProgress('test-attempt'));
+  tracker.launch();
+  tracker.encounter('weapon');
+  tracker.markEvidenceViewed('weapon');
+  const incidentConsole = new IncidentConsole({
+    progressOf: (bug) => tracker.progress.bugs[bug],
+    markEvidenceViewed: (bug) => tracker.markEvidenceViewed(bug),
+    useHint: (bug) => tracker.useHint(bug),
+    diagnose: (bug, optionId) => tracker.answerDiagnosis(bug, optionId),
+    applyPatch: () => {},
+  });
+  incidentConsole.open('weapon');
+  findByAttribute(incidentConsole.element, 'data-key', 'tab-diagnose').click();
+
+  return incidentConsole;
+}
+
+test('revealing a hint scrolls the new hint into view in the Incident Console', () => {
+  withRecordingPage(() => {
+    const incidentConsole = consoleOnDiagnosePane();
+
+    findByAttribute(incidentConsole.element, 'data-key', 'hint').click();
+
+    const hints = findByAttribute(incidentConsole.element, 'aria-label', 'Hints');
+    assert.equal(hints.children.length, 1);
+    assert.deepEqual(hints.children[0].scrolledIntoView, [{ block: 'nearest' }]);
+  });
+});
+
+/**
+ * An {@link InputController} with left, right, and fire pads on a controlled clock; `press` and
+ * `release` send a pad the pointer events a browser would, for pointer 1 unless named.
+ */
+function padHarness(testContext) {
+  testContext.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  const input = new InputController({ isGameActive: () => true, onPauseKey: () => {} });
+  const listeners = new Map();
+  for (const control of ['left', 'right', 'fire']) {
+    const button = { addEventListener: (name, listener) => listeners.set(`${control}:${name}`, listener) };
+    input.attachPad(control, button);
+  }
+  const send = (control, name, pointerId) =>
+    listeners.get(`${control}:${name}`)({ preventDefault: () => {}, pointerId, detail: 0 });
+
+  return {
+    input,
+    press: (control, pointerId = 1) => send(control, 'pointerdown', pointerId),
+    release: (control, name = 'pointerup', pointerId = 1) => send(control, name, pointerId),
+    activate: (control) => send(control, 'click'),
+    tick: (milliseconds) => testContext.mock.timers.tick(milliseconds),
+  };
+}
+
+test('a quick tap on a move pad keeps the ship moving until a full lane has passed', (testContext) => {
+  const pads = padHarness(testContext);
+
+  pads.press('left');
+  pads.release('left');
+  pads.tick(TAP_MOVE_MS - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('a quick tap on a move pad stops the ship once the lane is covered', (testContext) => {
+  const pads = padHarness(testContext);
+
+  pads.press('left');
+  pads.release('left');
+  pads.tick(TAP_MOVE_MS);
+
+  assert.equal(pads.input.current().left, false);
+});
+
+test('the pointerleave a touch sends after pointerup does not cut a tap short', (testContext) => {
+  const pads = padHarness(testContext);
+
+  pads.press('left');
+  pads.release('left', 'pointerup');
+  pads.release('left', 'pointerleave');
+  pads.tick(TAP_MOVE_MS - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('pressing the opposite move pad cancels the pending tap', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('left');
+  pads.release('left');
+
+  pads.press('right', 2);
+
+  assert.equal(pads.input.current().left, false);
+  assert.equal(pads.input.current().right, true);
+});
+
+test('releasing everything ends a pending tap', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('left');
+  pads.release('left');
+
+  pads.input.releaseAll();
+  pads.tick(TAP_MOVE_MS);
+
+  assert.equal(pads.input.current().left, false);
+});
+
+test('a keyboard activation of the opposite move pad cancels the pending tap', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('left');
+  pads.release('left');
+
+  pads.activate('right');
+
+  assert.equal(pads.input.current().left, false);
+  assert.equal(pads.input.current().right, true);
+});
+
+test('a burst of taps queues no more than two lanes of movement', (testContext) => {
+  const pads = padHarness(testContext);
+  for (let tapCount = 0; tapCount < 10; tapCount += 1) {
+    pads.press('left');
+    pads.release('left');
+  }
+
+  pads.tick(2 * TAP_MOVE_MS);
+
+  assert.equal(pads.input.current().left, false);
+});
+
+test('a burst of taps still carries the ship a full two lanes', (testContext) => {
+  const pads = padHarness(testContext);
+  for (let tapCount = 0; tapCount < 10; tapCount += 1) {
+    pads.press('left');
+    pads.release('left');
+  }
+
+  pads.tick(2 * TAP_MOVE_MS - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('two quick taps on a move pad carry the ship about two lanes', (testContext) => {
+  const pads = padHarness(testContext);
+  const gapMs = 50;
+
+  pads.press('left');
+  pads.release('left');
+  pads.tick(gapMs);
+  pads.press('left');
+  pads.release('left');
+  pads.tick(2 * TAP_MOVE_MS - gapMs - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('the fire pad is a plain hold that ends on release', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('fire');
+
+  pads.release('fire');
+
+  assert.equal(pads.input.current().fire, false);
+});
+
+test('the monitor state line is visually hidden but still in the accessibility tree', async () => {
+  const page = await readFile(path.join(packageDirectory, 'game', 'index.html'), 'utf8');
+  const stylesheet = await readFile(path.join(packageDirectory, 'game', 'src', 'styles.css'), 'utf8');
+
+  assert.match(page, /<p id="boothstrap-state" class="visually-hidden">glitch-state v1 /);
+  assert.doesNotMatch(page, /id="boothstrap-state"[^>]*(hidden=|aria-hidden|style=)/);
+  assert.doesNotMatch(stylesheet, /state-line/);
+  const rule = topLevelCssRule(stylesheet, '.visually-hidden');
+  assert.equal(rule.get('position'), 'absolute');
+  assert.equal(rule.get('width'), '1px');
+  for (const forbidden of ['display', 'visibility', 'font-size']) {
+    assert.equal(rule.has(forbidden), false);
+  }
+});
+
+test('toasts sit at the top of the arena so they never cover the ship or pickups', async () => {
+  const stylesheet = await readFile(path.join(packageDirectory, 'game', 'src', 'styles.css'), 'utf8');
+
+  const rule = topLevelCssRule(stylesheet, '.banner');
+
+  assert.equal(rule.get('top'), '10px');
+  assert.equal(rule.has('bottom'), false);
+});
+
+test('the completion card tells the participant the last step is with Pi', () => {
+  withRecordingPage(() => {
+    const progress = createProgress('test-attempt');
+
+    const card = completionCard(progress);
+
+    assert.match(card.textContent, /Last step: tell Pi which clue helped most\./);
+  });
 });

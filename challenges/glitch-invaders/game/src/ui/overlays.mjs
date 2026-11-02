@@ -153,6 +153,7 @@ export function completionCard(progress, onContinue, onReset) {
         );
       }),
     ),
+    h('p', { class: 'last-step' }, 'Last step: tell Pi which clue helped most.'),
     onContinue || onReset
       ? h(
           'div',

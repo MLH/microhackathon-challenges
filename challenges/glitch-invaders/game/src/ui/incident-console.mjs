@@ -40,6 +40,8 @@ export class IncidentConsole {
   evidence = null;
   diagnosisFeedback = '';
   patchObservation = null;
+  /** The last revealed hint's list item in the rendered diagnosis pane, if any. */
+  newestHint = null;
 
   constructor(host) {
     this.host = host;
@@ -124,11 +126,7 @@ export class IncidentConsole {
         ),
         this.tabs(progress),
       ),
-      h(
-        'div',
-        { class: 'pane', role: 'tabpanel', 'aria-labelledby': `tab-${this.pane}` },
-        this.paneBody(progress),
-      ),
+      this.paneRegion(progress),
     );
 
     this.element.replaceChildren(dialog);
@@ -179,8 +177,27 @@ export class IncidentConsole {
     );
   }
 
-  /** The body for the selected pane. */
-  paneBody(progress) {
+  /**
+   * The selected pane: its content scrolls inside the dialog, while the outcome of the last action
+   * and the buttons that move on stay pinned below it, so they are always on screen.
+   */
+  paneRegion(progress) {
+    const { content, actions } = this.paneParts(progress);
+    const pinned = actions.filter((action) => action !== null);
+
+    return h(
+      'div',
+      { class: 'pane', role: 'tabpanel', 'aria-labelledby': `tab-${this.pane}` },
+      h('div', { class: 'pane-scroll' }, content),
+      pinned.length === 0 ? null : h('div', { class: 'pane-actions' }, ...pinned),
+    );
+  }
+
+  /**
+   * The selected pane's scrolling content and its pinned actions, as `{ content, actions }`;
+   * `actions` may hold `null` for a control the current step does not show.
+   */
+  paneParts(progress) {
     switch (this.pane) {
       case 'evidence':
         return this.evidencePane();
@@ -195,12 +212,15 @@ export class IncidentConsole {
   evidencePane() {
     const evidence = this.evidence;
     if (evidence === null) {
-      return h(
-        'p',
-        { class: 'status', role: 'status' },
-        h('span', { class: 'spinner', 'aria-hidden': 'true' }, '◌'),
-        ' Capturing telemetry…',
-      );
+      return {
+        content: h(
+          'p',
+          { class: 'status', role: 'status' },
+          h('span', { class: 'spinner', 'aria-hidden': 'true' }, '◌'),
+          ' Capturing telemetry…',
+        ),
+        actions: [],
+      };
     }
 
     const contextSection = evidence.sections.find((section) => section.kind === 'context');
@@ -211,17 +231,16 @@ export class IncidentConsole {
         section.kind === 'waterfall',
     );
 
-    return h(
-      'div',
-      { class: 'evidence' },
-      this.sentryHero(evidence),
-      contextSection === undefined ? null : renderContextPills(contextSection),
-      primarySection === undefined ? null : renderSection(primarySection),
-      h(
+    return {
+      content: h(
         'div',
-        { class: 'pane-actions' },
+        { class: 'evidence' },
+        this.sentryHero(evidence),
+        contextSection === undefined ? null : renderContextPills(contextSection),
+        primarySection === undefined ? null : renderSection(primarySection),
+      ),
+      actions: [
         h('span', { class: 'muted' }, `Ref: ${evidence.referenceId}`),
-        h('span', { class: 'spacer' }),
         onClick(
           h(
             'button',
@@ -233,8 +252,8 @@ export class IncidentConsole {
             this.render();
           },
         ),
-      ),
-    );
+      ],
+    };
   }
 
   /**
@@ -281,10 +300,13 @@ export class IncidentConsole {
   diagnosePane(progress) {
     const definition = BUG_DEFINITIONS[this.bug];
     const solved = progress.stage === 'investigated' || progress.stage === 'repaired';
-    const hints = definition.hints.slice(0, progress.hintsUsed);
+    const hintItems = definition.hints
+      .slice(0, progress.hintsUsed)
+      .map((hint) => h('li', {}, hint));
     const nextHint = progress.hintsUsed < definition.hints.length;
+    this.newestHint = hintItems.at(-1) ?? null;
 
-    return h(
+    const content = h(
       'div',
       { class: 'diagnose' },
       h('p', { class: 'question' }, definition.question),
@@ -314,26 +336,24 @@ export class IncidentConsole {
           return onClick(button, () => this.answer(option.id));
         }),
       ),
-      this.diagnosisFeedback === ''
+      hintItems.length === 0
         ? null
-        : h(
-            'p',
-            { class: 'feedback feedback-danger', role: 'alert' },
-            `✖ ${this.diagnosisFeedback}`,
-          ),
-      solved
-        ? h('p', { class: 'feedback feedback-success', role: 'status' }, '✓ Root cause confirmed.')
-        : null,
-      hints.length === 0
-        ? null
-        : h(
-            'ol',
-            { class: 'hints', 'aria-label': 'Hints' },
-            ...hints.map((hint) => h('li', {}, hint)),
-          ),
-      h(
-        'div',
-        { class: 'pane-actions' },
+        : h('ol', { class: 'hints', 'aria-label': 'Hints' }, ...hintItems),
+    );
+
+    return {
+      content,
+      actions: [
+        this.diagnosisFeedback === ''
+          ? null
+          : h(
+              'p',
+              { class: 'feedback feedback-danger', role: 'alert' },
+              `✖ ${this.diagnosisFeedback}`,
+            ),
+        solved
+          ? h('p', { class: 'feedback feedback-success', role: 'status' }, '✓ Root cause confirmed.')
+          : null,
         solved || !nextHint
           ? null
           : onClick(
@@ -345,9 +365,9 @@ export class IncidentConsole {
               () => {
                 this.host.useHint(this.bug);
                 this.render();
+                this.newestHint?.scrollIntoView({ block: 'nearest' });
               },
             ),
-        h('span', { class: 'spacer' }),
         solved
           ? onClick(
               h(
@@ -361,8 +381,8 @@ export class IncidentConsole {
               },
             )
           : null,
-      ),
-    );
+      ],
+    };
   }
 
   /** Submit a diagnosis; a right one moves on to the patch pane. */
@@ -378,10 +398,13 @@ export class IncidentConsole {
   /** Patches: responsive 3-column grid of code patch cards. Wrong ones fail visibly and revert. */
   patchPane(progress) {
     if (progress.stage !== 'investigated') {
-      return h('p', { class: 'status' }, 'Diagnose the failure to unlock patches.');
+      return {
+        content: h('p', { class: 'status' }, 'Diagnose the failure to unlock patches.'),
+        actions: [],
+      };
     }
 
-    return h(
+    const content = h(
       'div',
       { class: 'patches' },
       h(
@@ -417,14 +440,20 @@ export class IncidentConsole {
           );
         }),
       ),
-      this.patchObservation === null
-        ? null
-        : h(
-            'p',
-            { class: 'feedback feedback-danger', role: 'alert' },
-            `✖ Reverted. ${this.patchObservation.text}`,
-          ),
     );
+
+    return {
+      content,
+      actions: [
+        this.patchObservation === null
+          ? null
+          : h(
+              'p',
+              { class: 'feedback feedback-danger', role: 'alert' },
+              `✖ Reverted. ${this.patchObservation.text}`,
+            ),
+      ],
+    };
   }
 
   /** Try a patch; the game closes the console when it works. */

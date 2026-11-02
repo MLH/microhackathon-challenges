@@ -1,12 +1,19 @@
 /**
  * Player input: keyboard and on-screen controls feed one shared {@link InputState}. Holding a pad
- * button works with a pointer; pressing it with Enter or Space gives a short pulse, so a keyboard
- * user can drive the pads too.
+ * button works with a pointer, and a tap on a move pad carries the ship one lane; pressing it with
+ * Enter or Space gives a short pulse, so a keyboard user can drive the pads too.
  */
+import { ENEMY_GAP_X, ENEMY_WIDTH, PLAYER_SPEED } from '../engine/constants.mjs';
 import { idleInput } from '../engine/world.mjs';
 
 /** How long a keyboard activation of a pad button counts as held. */
 const PAD_PULSE_MS = 180;
+
+/** A tap on a move pad holds long enough to carry the ship one enemy-formation lane. */
+export const TAP_MOVE_MS = Math.round(((ENEMY_WIDTH + ENEMY_GAP_X) / PLAYER_SPEED) * 1000);
+
+/** How many lanes of movement a burst of taps can queue ahead of the ship. */
+const MAX_TAP_QUEUE_LANES = 2;
 
 /** The keys that mean each control. */
 const KEY_CONTROLS = new Map([
@@ -17,13 +24,21 @@ const KEY_CONTROLS = new Map([
   ['Space', 'fire'],
 ]);
 
+/** The move pad that cancels each move pad's pending tap when pressed. */
+const OPPOSITE_PADS = new Map([
+  ['left', 'right'],
+  ['right', 'left'],
+]);
+
 /** Collects keyboard and pad input. */
 export class InputController {
   state = idleInput();
   keysDown = new Set();
-  padsDown = new Map();
+  /** The pointer IDs holding each pad down, so a stray release from another pointer is ignored. */
+  pointersDown = new Map();
+  /** Each control's timed hold from a tap or a keyboard pulse, as `{ timer, endsAt }`. */
+  timedHolds = new Map();
   options;
-  pulseTimers = new Set();
 
   constructor(options) {
     this.options = options;
@@ -58,25 +73,31 @@ export class InputController {
   /** Let go of everything, such as when a dialog opens or the window loses focus. */
   releaseAll() {
     this.keysDown.clear();
-    this.padsDown.clear();
-    for (const timer of this.pulseTimers) {
-      clearTimeout(timer);
+    this.pointersDown.clear();
+    for (const control of [...this.timedHolds.keys()]) {
+      this.cancelTimedHold(control);
     }
-    this.pulseTimers.clear();
     this.recompute();
   }
 
-  /** Wire one pad button: hold with a pointer, pulse with the keyboard. */
+  /**
+   * Wire one pad button: hold with a pointer, pulse with the keyboard. A pointer's hold ends on its
+   * first release event; browsers send `pointerleave` right after `pointerup` on touch, and that
+   * second release must not end a tap's timed hold.
+   */
   attachPad(control, button) {
     const press = (event) => {
       event.preventDefault();
-      this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
+      const pointers = this.pointersDown.get(control) ?? new Set();
+      pointers.add(event.pointerId);
+      this.pointersDown.set(control, pointers);
+      if (OPPOSITE_PADS.has(control)) {
+        this.tap(control);
+      }
       this.recompute();
     };
-    const release = () => {
-      const holds = this.padsDown.get(control) ?? 0;
-      if (holds > 0) {
-        this.padsDown.set(control, holds - 1);
+    const release = (event) => {
+      if (this.pointersDown.get(control)?.delete(event.pointerId)) {
         this.recompute();
       }
     };
@@ -93,17 +114,54 @@ export class InputController {
     });
   }
 
-  /** Hold `control` briefly. */
+  /**
+   * A tap on a move pad: hold one more lane's worth, so two quick taps move about two lanes. The
+   * hold never runs past {@link MAX_TAP_QUEUE_LANES} lanes from now, so a burst of taps cannot queue
+   * seconds of movement.
+   */
+  tap(control) {
+    const now = Date.now();
+    const pendingEnd = this.timedHolds.get(control)?.endsAt ?? now;
+    const queuedEnd = Math.max(pendingEnd, now) + TAP_MOVE_MS;
+    this.cancelOppositeTap(control);
+    this.holdUntil(control, Math.min(queuedEnd, now + MAX_TAP_QUEUE_LANES * TAP_MOVE_MS));
+  }
+
+  /** Hold `control` for a keyboard activation; repeats do not add up, so auto-repeat stops on release. */
   pulse(control) {
-    this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
+    this.cancelOppositeTap(control);
+    const pendingEnd = this.timedHolds.get(control)?.endsAt ?? 0;
+    this.holdUntil(control, Math.max(pendingEnd, Date.now() + PAD_PULSE_MS));
     this.recompute();
+  }
+
+  /** End the pending timed hold of the move pad opposite `control`, if it has one. */
+  cancelOppositeTap(control) {
+    const opposite = OPPOSITE_PADS.get(control);
+    if (opposite !== undefined) {
+      this.cancelTimedHold(opposite);
+    }
+  }
+
+  /** Hold `control` until the `endsAt` timestamp, replacing any timed hold it has. */
+  holdUntil(control, endsAt) {
+    this.cancelTimedHold(control);
     const timer = setTimeout(() => {
-      this.pulseTimers.delete(timer);
-      const holds = this.padsDown.get(control) ?? 0;
-      this.padsDown.set(control, Math.max(0, holds - 1));
+      this.timedHolds.delete(control);
       this.recompute();
-    }, PAD_PULSE_MS);
-    this.pulseTimers.add(timer);
+    }, endsAt - Date.now());
+    this.timedHolds.set(control, { timer, endsAt });
+  }
+
+  /** End `control`'s timed hold early, if it has one. The caller recomputes. */
+  cancelTimedHold(control) {
+    const hold = this.timedHolds.get(control);
+    if (hold === undefined) {
+      return;
+    }
+
+    clearTimeout(hold.timer);
+    this.timedHolds.delete(control);
   }
 
   /** Handle a key press. */
@@ -141,7 +199,8 @@ export class InputController {
   /** Rebuild the shared state from what is held. */
   recompute() {
     const held = (control) =>
-      (this.padsDown.get(control) ?? 0) > 0 ||
+      (this.pointersDown.get(control)?.size ?? 0) > 0 ||
+      this.timedHolds.has(control) ||
       [...this.keysDown].some((code) => KEY_CONTROLS.get(code) === control);
 
     this.state.left = held('left');
