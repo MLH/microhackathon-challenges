@@ -398,6 +398,17 @@ test('the dice view keeps its back hint and each roll whole at 40 columns', inst
   assert.deepEqual(lines.filter((line) => line.startsWith('·')), [])
 })
 
+test('the dice view wraps a roll wider than the terminal instead of cutting it', installedPackageTest, async () => {
+  const { form } = await openMadLibsForm()
+
+  openDiceView(form)
+  const shown = form.render(16).join(' ')
+
+  for (const option of ['Exhausted night-shift nurses', 'Calculator / What-If Tool', 'Audience (d20):']) {
+    assert.ok(shown.replace(/\s+/g, ' ').includes(option), `the dice view cuts "${option}"`)
+  }
+})
+
 for (const key of ['enter', 'escape']) {
   test(`${key} in the dice view goes back to the fields, keeping the draft and the form open`, installedPackageTest, async () => {
     const { form, closedWith, screen } = await openMadLibsForm()

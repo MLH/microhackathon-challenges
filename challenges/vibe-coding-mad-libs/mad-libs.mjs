@@ -33,7 +33,8 @@ function promptAlreadySent(ctx) {
 /**
  * Draws one dice table as `Theme (d6): 1 Dashboard · 2 Game · …`, wrapped
  * to `width` between rolls, so a roll stays whole with the separator after
- * it. pi-tui's wrapping can't do this: it breaks at no-break spaces too.
+ * it. pi-tui's wrapping can't do this: it breaks at no-break spaces too. A
+ * roll wider than `width` wraps on its own lines.
  */
 function diceTableLines({ field, die, options }, width) {
   const pieces = options.map((option, index) => `${index + 1} ${option}${index < options.length - 1 ? ' ·' : ''}`)
@@ -50,7 +51,7 @@ function diceTableLines({ field, die, options }, width) {
   }
   lines.push(line)
 
-  return lines.map((text) => truncateToWidth(text, width))
+  return lines.flatMap((text) => wrapTextWithAnsi(text, width))
 }
 
 /**
