@@ -42,9 +42,8 @@ starts (after `session_info`, when you have it): call `show_preview` with
 them that URL to open right away.
 
 Whenever `show_preview` returns `offered`, a dialog is still asking the
-participant whether to open the page: tell them to click **Open preview**,
-here "Click **Open preview** to start drawing." Never say the page is open
-until a call returns `navigated`.
+participant whether to open the page. Say "Click **Open preview** to start
+drawing." Never say the page is open until a call returns `navigated`.
 
 When you resume with `draw-bird` not yet complete, first use `bash` to check
 whether `bird.png` exists in the current directory: a save made just before
