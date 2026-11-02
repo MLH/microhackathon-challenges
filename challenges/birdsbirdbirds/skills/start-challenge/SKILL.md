@@ -41,9 +41,10 @@ starts (after `session_info`, when you have it): call `show_preview` with
 `http://127.0.0.1:4322/` without asking first. Without `show_preview`, give
 them that URL to open right away.
 
-When `show_preview` returns `offered`, a dialog is still asking the
-participant whether to open the page: say "Click **Open preview** to start
-drawing." Never say the page is open until it returns `navigated`.
+Whenever `show_preview` returns `offered`, a dialog is still asking the
+participant whether to open the page: tell them to click **Open preview**,
+here "Click **Open preview** to start drawing." Never say the page is open
+until a call returns `navigated`.
 
 When you resume with `draw-bird` not yet complete, first use `bash` to check
 whether `bird.png` exists in the current directory: a save made just before
@@ -116,7 +117,8 @@ checker or edit it. When it passes, report `animate`.
 
 The drawing page switches to the sky on its own once a valid `bird.json`
 exists. Tell the participant to look at it (call `show_preview` again if the
-page was closed). They can press "Draw again" to redraw; if they do, start
+page was closed; on `offered`, say "Click **Open preview** to watch it
+fly."). They can press "Draw again" to redraw; if they do, start
 again at step 1.
 
 Ask how the flight looks and offer one tweak, such as faster, higher, or
@@ -127,7 +129,8 @@ Finish, so it waits for the gallery answer.
 
 ## 5. Gallery
 
-Only with `publish_gallery_item`; without it, skip to step 6. Use the display
+Only with `publish_gallery_item`; without it, or if you already published
+this bird in this conversation, skip to step 6. Use the display
 name from `session_info` and ask: "Want this on the booth screens? It'll show
 with your name, [display name], and staff can remove it at any time."
 
@@ -144,5 +147,7 @@ On a no, move on without publishing.
 
 ## 6. Finish
 
-Report `fly`. With `report_step`, end with exactly: "Press Finish to claim
-your 150 pts." Finish closes the page, so don't invite them to keep watching.
+Report `fly`. With `report_step`, end with the finish line, naming the
+points: "All steps are done. Press Enter, or choose Finish, to claim your 150
+pts." Finish closes the page and clears the bird, so don't invite them to
+keep watching it.
