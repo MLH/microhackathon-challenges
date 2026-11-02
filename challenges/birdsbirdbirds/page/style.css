@@ -44,39 +44,45 @@ button:disabled {
   opacity: 0.45;
 }
 
+/* The booth station's Chrome is about 1000x597, so the whole drawing page,
+   Save button included, must fit one screen. The floor keeps shorter or
+   narrower windows usable by letting the page scroll instead of squashing. */
 #draw-mode {
-  max-width: 1000px;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-width: 1280px;
+  height: max(100dvh, 540px);
   margin: 0 auto;
-  padding: 24px 20px 40px;
+  padding: 10px 20px 14px;
 }
 
 .draw-header h1 {
-  margin: 0 0 6px;
-  font-size: 2.4rem;
+  margin: 0 0 2px;
+  font-size: 1.7rem;
+  line-height: 1.15;
 }
 
 .lead {
-  margin: 0 0 20px;
-  font-size: 1.15rem;
+  margin: 0 0 8px;
+  font-size: 1rem;
 }
 
 .draw-layout {
   display: flex;
-  flex-wrap: wrap;
   gap: 24px;
-  align-items: flex-start;
+  min-height: 0;
 }
 
 .toolbar {
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  flex: 0 0 220px;
+  gap: 8px;
+  flex: 0 0 280px;
 }
 
 .tool-group {
   margin: 0;
-  padding: 12px;
+  padding: 4px 8px 8px;
   border: 2px solid var(--slide-text);
   border-radius: 14px;
   background: #fff;
@@ -91,28 +97,29 @@ button:disabled {
 .sizes,
 .tools {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  gap: 4px;
 }
 
 .swatch {
-  width: 52px;
-  height: 52px;
+  flex: 1;
+  min-width: 0;
+  aspect-ratio: 1;
+  max-height: 44px;
   border: 3px solid #fff;
   border-radius: 50%;
   box-shadow: 0 0 0 2px var(--slide-text);
 }
 
 .swatch[aria-pressed="true"] {
-  box-shadow: 0 0 0 4px var(--slide-text), 0 0 0 7px var(--slide-lime);
+  box-shadow: 0 0 0 3px var(--slide-text), 0 0 0 5px var(--slide-lime);
 }
 
 .size {
   display: flex;
+  flex: 1;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
+  height: 44px;
   border: 2px solid var(--slide-text);
   border-radius: 12px;
   background: #fff;
@@ -132,12 +139,12 @@ button:disabled {
 .tool-button,
 .action-button {
   flex: 1;
-  min-height: 52px;
-  padding: 8px 14px;
+  min-height: 44px;
+  padding: 4px 14px;
   border: 2px solid var(--slide-text);
   border-radius: 12px;
   background: #fff;
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 700;
 }
 
@@ -146,16 +153,27 @@ button:disabled {
   gap: 8px;
 }
 
-.canvas-column {
+/* Beside the tools, so Save is never below the fold. */
+.save-area {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 14px;
-  flex: 1 1 512px;
+  gap: 6px;
+  align-items: stretch;
+}
+
+/* Sized from the space left over, so the square canvas never overflows. */
+.canvas-column {
+  display: flex;
+  flex: 1;
+  align-items: flex-start;
+  justify-content: center;
+  min-width: 0;
+  container-type: size;
 }
 
 .canvas-frame {
-  width: min(512px, 100%);
+  /* Room for the frame's 6px offset shadow. */
+  width: min(100cqw - 6px, 100cqh - 6px, 640px);
   aspect-ratio: 1;
   border: 3px solid var(--slide-text);
   border-radius: 16px;
@@ -181,14 +199,13 @@ button:disabled {
 }
 
 .save-button {
-  min-width: 260px;
-  min-height: 64px;
-  padding: 12px 32px;
+  min-height: 56px;
+  padding: 8px 16px;
   border: 3px solid var(--slide-text);
   border-radius: 16px;
   background: var(--slide-lime);
   box-shadow: 4px 4px 0 var(--slide-text);
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   font-weight: 800;
 }
 
@@ -198,9 +215,9 @@ button:disabled {
 }
 
 .status {
-  min-height: 1.5em;
+  min-height: 2.6em;
   margin: 0;
-  font-size: 1.2rem;
+  font-size: 1rem;
   font-weight: 600;
   text-align: center;
 }
@@ -215,14 +232,16 @@ button:disabled {
 
 .waiting {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.9rem;
+  text-align: center;
   opacity: 0.7;
 }
 
 .link-button {
+  padding: 2px;
   border: none;
   background: none;
-  font-size: 1.1rem;
+  font-size: 1rem;
   font-weight: 700;
   text-decoration: underline;
 }

@@ -42,6 +42,9 @@ const toSkyButton = document.getElementById('to-sky-button')
 const drawAgainButton = document.getElementById('draw-again-button')
 const sky = document.getElementById('sky')
 
+const INITIAL_PROMPT = 'Pick a colour and start drawing.'
+const DRAWN_PROMPT = 'Looking good! Press Save my bird when it’s done.'
+
 const pen = { colour: COLOURS[0].value, width: PEN_SIZES[1].width, erasing: false }
 const stroke = { pointerId: undefined, lastPoint: undefined }
 const undoSnapshots = []
@@ -191,6 +194,16 @@ function endStroke(event) {
 
   stroke.pointerId = undefined
   stroke.lastPoint = undefined
+  promptToSave()
+}
+
+/**
+ * Swaps the initial prompt for a nudge to save once there is a drawing.
+ * Any other message (Undone, Cleared, Saved, an error) is left alone, since
+ * it reports something the attendee just did.
+ */
+function promptToSave() {
+  if (statusLine.textContent === INITIAL_PROMPT) setStatus(DRAWN_PROMPT)
 }
 
 /** Clears the canvas to transparent, undoably. */
