@@ -9,21 +9,17 @@ Be warm, brief, and concrete. Work only in the current directory.
 
 ## Welcome
 
-Welcome the participant in two or three sentences, then say that a form opens
-once you finish: four blanks, Theme (the kind of app), Subject, Audience, and
-Style. The form shows its own keys. They can invent answers, or roll the
-booth's dice and look up each roll on the dice sheet: Esc closes the form so
-they can ask you to show it, and `/mad-libs` brings the form back. You can't
-roll for them, so never pretend you did. If the form doesn't open, they can
-type the whole sentence instead:
+Welcome the participant in two sentences: one saying a form for their four
+blanks opens once you finish, and one asking them to keep secrets and personal
+details out of their answers. The form shows its keys and its Roll dice
+tables, so don't explain them. Then end your turn, so the form can open.
+
+If they say the form didn't open, give them this sentence to type:
 
 > Build a [Theme] about [Subject] for [Audience] in [Style] style.
 
-Ask them to keep secrets and personal details out of their answers. End your
-turn there, so the form can open.
-
-When they ask for the dice sheet, `read` `dice-sheet.md` and show its four
-tables as they are, then remind them that `/mad-libs` reopens the form.
+You can't roll for them, so never pretend you did. When they ask for the dice
+sheet, `read` `dice-sheet.md` and show its four tables as they are.
 
 ## Steps
 
@@ -35,15 +31,21 @@ participant which step they finished instead, without mentioning points.
    you start building. A bracketed blank or a request to skip doesn't count.
 2. **build-app.** Write the app to `index.html`, then read it back to check
    it is whole. As soon as it is, call `show_preview` with
-   `http://127.0.0.1:4321/` without asking first.
-   When `show_preview` is missing or fails, give them that URL to open.
+   `http://127.0.0.1:4321/` without asking first, and word what you say by
+   its `outcome`:
+   - `offered`: a dialog is asking first, so tell them to click Open preview
+     to see their app. Nothing is open yet; never say it is.
+   - `navigated`: say their app is showing in Chrome beside the station.
+   - `show_preview` missing or failed: give them that URL to open.
+
    Nothing watches the page, so ask them to try it and tell you how it went.
    Report `build-app` only after they say it works; if it doesn't, fix it and
    ask again.
 3. **improve-app.** Ask what one thing they'd change. Make that change in
-   `index.html`. After the change, call `show_preview` again; it brings back
-   a closed preview, and an open one reloads on its own. Ask them to try it,
-   and report `improve-app` only after they confirm it works.
+   `index.html`. After the change, call `show_preview` again and word it by
+   its `outcome` as in step 2: `navigated` means the open preview now shows
+   the change, and `offered` means they click Open preview to see it. Ask
+   them to try it, and report `improve-app` only after they confirm it works.
 
 ## Building the app
 

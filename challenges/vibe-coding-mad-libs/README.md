@@ -2,14 +2,16 @@
 
 A 10-minute terminal challenge. The participant fills four Mad Libs blanks,
 Theme, Subject, Audience, and Style, by inventing answers or rolling physical
-dice against [`dice-sheet.md`](dice-sheet.md). Pi builds a self-contained
-`index.html` from the sentence, shows it in Chrome beside the station, and
-then makes one change the participant asks for.
+dice and looking each roll up under Roll dice in the form, which shows the
+tables in [`dice-sheet.md`](dice-sheet.md). Pi builds a self-contained
+`index.html` from the sentence, offers to show it in Chrome beside the
+station, and then makes one change the participant asks for.
 
 | File | Role |
 | --- | --- |
-| `mad-libs.mjs` | Pi extension: the four-blank form and `/mad-libs` |
+| `mad-libs.mjs` | Pi extension: the four-blank form, its Roll dice tables, and `/mad-libs` |
 | `prompt.mjs` | Assembles and checks the sentence |
+| `dice.mjs` | Parses `dice-sheet.md` into the Roll dice tables |
 | `preview.mjs` | Serves `index.html` on `http://127.0.0.1:4321/` with live reload |
 | `install` | Installs the Pi packages the extension imports |
 | `setup`, `cleanup` | Copy the dice sheet and start the preview; stop it |
@@ -20,7 +22,7 @@ Install Pi and the adapter at the versions boothstrap pins, as in
 boothstrap's authoring guide, then, from this repo's root:
 
 ```sh
-challenge="$PWD/vibe-coding-mad-libs"
+challenge="$PWD/challenges/vibe-coding-mad-libs"
 "$challenge/install"
 mkdir -p tmp/mad-libs && cd tmp/mad-libs
 "$challenge/setup"

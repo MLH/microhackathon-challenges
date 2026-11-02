@@ -1,14 +1,17 @@
 // Pi extension: the four-blank Mad Libs form. It opens once Pi's welcome
 // finishes, reopens with /mad-libs, and sends the filled sentence as the
-// participant's message. Typing the sentence in Pi's editor works without it.
+// participant's message. Its Roll dice view shows the dice sheet's tables.
+// Typing the sentence in Pi's editor works without it.
 
-import { Input, matchesKey, truncateToWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
+import { Input, matchesKey, truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
 
+import { readDiceTables } from './dice.mjs'
 import { FIELDS, PROMPT_TEMPLATE, assemblePrompt, fillSentence, findBlankField, hasUnfilledBlank, isFinishedPrompt } from './prompt.mjs'
 
-/** The form's focus stops: one per field, then the Build button. */
+/** The form's focus stops: one per field, then the Build and Roll dice buttons. */
 const BUILD_BUTTON = FIELDS.length
-const FOCUS_STOPS = FIELDS.length + 1
+const ROLL_DICE_BUTTON = FIELDS.length + 1
+const FOCUS_STOPS = FIELDS.length + 2
 
 /** How many lines of the sentence preview the form shows. */
 const PREVIEW_LINES = 5
@@ -28,13 +31,38 @@ function promptAlreadySent(ctx) {
 }
 
 /**
- * Builds the form component for `ctx.ui.custom`. `draft` keeps answers
- * across closes, keyed by field; `keybindings` supplies Pi's submit and
- * cancel keys; `done` receives the sentence, or null when cancelled.
+ * Draws one dice table as `Theme (d6): 1 Dashboard · 2 Game · …`, wrapped
+ * to `width` between rolls, so a roll stays whole with the separator after
+ * it. pi-tui's wrapping can't do this: it breaks at no-break spaces too. A
+ * roll wider than `width` wraps on its own lines.
  */
-function createForm({ tui, theme, keybindings, draft, done }) {
+function diceTableLines({ field, die, options }, width) {
+  const pieces = options.map((option, index) => `${index + 1} ${option}${index < options.length - 1 ? ' ·' : ''}`)
+  const lines = []
+  let line = `${field.label} (${die}):`
+  for (const piece of pieces) {
+    if (visibleWidth(`${line} ${piece}`) <= width) {
+      line = `${line} ${piece}`
+      continue
+    }
+
+    lines.push(line)
+    line = piece
+  }
+  lines.push(line)
+
+  return lines.flatMap((text) => wrapTextWithAnsi(text, width))
+}
+
+/**
+ * Builds the form component for `ctx.ui.custom`. `draft` keeps answers
+ * across closes, keyed by field; `diceTables` fill the Roll dice view;
+ * `keybindings` supplies Pi's submit and cancel keys; `done` receives the
+ * sentence, or null when cancelled.
+ */
+function createForm({ tui, theme, keybindings, draft, diceTables, done }) {
   const inputs = FIELDS.map((field) => {
-    const input = new Input({ prompt: '', placeholder: field.placeholder })
+    const input = new Input({ prompt: '', placeholder: field.placeholder, placeholderStyle: (text) => theme.fg('muted', text) })
     // setValue leaves the cursor at column zero; typing the draft puts it at the end.
     if (draft[field.key]) input.handleInput(draft[field.key])
 
@@ -42,7 +70,20 @@ function createForm({ tui, theme, keybindings, draft, done }) {
   })
   let focusedStop = 0
   let hasFocus = true
+  let showingDice = false
   let error = ''
+
+  /**
+   * Draws field `index`: the focused one as its Input, with the cursor, and
+   * the rest as plain text, since Input draws a cursor even when unfocused.
+   */
+  function renderField(index, width) {
+    if (hasFocus && index === focusedStop) return inputs[index].render(width)
+
+    const value = inputs[index].getValue()
+
+    return [value || theme.fg('muted', FIELDS[index].placeholder)]
+  }
 
   /** Moves focus to stop `target`, wrapping around both ends. */
   function focusStop(target) {
@@ -65,6 +106,25 @@ function createForm({ tui, theme, keybindings, draft, done }) {
     done(assemblePrompt(draft))
   }
 
+  /** Switches between the fields and the Roll dice view, keeping the draft. */
+  function showDice(show) {
+    showingDice = show
+    tui.requestRender()
+  }
+
+  /** Draws the dice tables, wrapped to `width`, with how to go back first. */
+  function renderDice(width) {
+    const wrapWidth = Math.max(1, width)
+    const wrap = (text) => wrapTextWithAnsi(text, wrapWidth)
+
+    return [
+      ...wrap(theme.fg('accent', theme.bold('Roll dice'))),
+      ...wrap(theme.fg('muted', 'Enter/Esc: back to the form')),
+      ...wrap(theme.fg('muted', 'Type each roll\'s option into its blank, or invent your own.')),
+      ...diceTables.flatMap((table) => diceTableLines(table, wrapWidth)),
+    ]
+  }
+
   focusStop(0)
 
   return {
@@ -76,13 +136,21 @@ function createForm({ tui, theme, keybindings, draft, done }) {
       focusStop(focusedStop)
     },
     handleInput(data) {
+      if (showingDice) {
+        const leavesDice = keybindings.matches(data, 'tui.select.cancel') || keybindings.matches(data, 'tui.input.submit')
+
+        return leavesDice ? showDice(false) : undefined
+      }
       if (keybindings.matches(data, 'tui.select.cancel')) return done(null)
       if (matchesKey(data, 'shift+tab')) return focusStop(focusedStop - 1)
       if (matchesKey(data, 'tab')) return focusStop(focusedStop + 1)
       if (keybindings.matches(data, 'tui.input.submit')) {
-        return focusedStop === BUILD_BUTTON ? build() : focusStop(focusedStop + 1)
+        if (focusedStop === BUILD_BUTTON) return build()
+        if (focusedStop === ROLL_DICE_BUTTON) return showDice(true)
+
+        return focusStop(focusedStop + 1)
       }
-      if (focusedStop === BUILD_BUTTON) return
+      if (focusedStop >= BUILD_BUTTON) return
 
       const field = FIELDS[focusedStop]
       inputs[focusedStop].handleInput(data)
@@ -91,6 +159,8 @@ function createForm({ tui, theme, keybindings, draft, done }) {
       tui.requestRender()
     },
     render(width) {
+      if (showingDice) return renderDice(width)
+
       const fit = (text) => truncateToWidth(text, Math.max(1, width))
       const marker = (stop) => (focusedStop === stop ? '›' : ' ')
       const lines = [
@@ -99,9 +169,9 @@ function createForm({ tui, theme, keybindings, draft, done }) {
       ]
       FIELDS.forEach((field, index) => {
         lines.push(fit(`${marker(index)} ${field.label}`))
-        lines.push(...inputs[index].render(width).map(fit))
+        lines.push(...renderField(index, width).map(fit))
       })
-      lines.push(fit(`${marker(BUILD_BUTTON)} [ Build ]`), '')
+      lines.push(fit(`${marker(BUILD_BUTTON)} [ Build ]   ${marker(ROLL_DICE_BUTTON)} [ Roll dice ]`), '')
 
       const preview = wrapTextWithAnsi(fillSentence(draft), Math.max(1, width))
       lines.push(...preview.slice(0, PREVIEW_LINES).map(fit))
@@ -119,6 +189,7 @@ function createForm({ tui, theme, keybindings, draft, done }) {
 /** Registers the form, its /mad-libs command, and the typed-sentence check with Pi. */
 export default function madLibs(pi) {
   const draft = Object.fromEntries(FIELDS.map((field) => [field.key, '']))
+  const diceTables = readDiceTables()
   let formOpen = false
   let openAfterWelcome = false
 
@@ -136,7 +207,7 @@ export default function madLibs(pi) {
     formOpen = true
     let sentence
     try {
-      sentence = await ctx.ui.custom((tui, theme, keybindings, done) => createForm({ tui, theme, keybindings, draft, done }))
+      sentence = await ctx.ui.custom((tui, theme, keybindings, done) => createForm({ tui, theme, keybindings, draft, diceTables, done }))
     } catch {
       ctx.ui.notify(`The form couldn't open. Type the sentence instead: ${PROMPT_TEMPLATE}`, 'warning')
       return
