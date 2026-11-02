@@ -2136,6 +2136,18 @@ test('a burst of taps queues no more than two lanes of movement', (testContext) 
   assert.equal(pads.input.current().left, false);
 });
 
+test('a burst of taps still carries the ship a full two lanes', (testContext) => {
+  const pads = padHarness(testContext);
+  for (let tapCount = 0; tapCount < 10; tapCount += 1) {
+    pads.press('left');
+    pads.release('left');
+  }
+
+  pads.tick(2 * TAP_MOVE_MS - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
 test('two quick taps on a move pad carry the ship about two lanes', (testContext) => {
   const pads = padHarness(testContext);
   const gapMs = 50;
