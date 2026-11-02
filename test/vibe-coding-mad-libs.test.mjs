@@ -1,6 +1,7 @@
 // Proves the vibe-coding-mad-libs package: prompt assembly, the extension
-// loading under its pinned Pi packages, and the setup and cleanup hooks. The
-// install test is the only one that uses the network, to reach the npm registry.
+// loading under its pinned Pi packages, the form it draws, and the setup and
+// cleanup hooks. Installing a copy of the package, shared by the extension and
+// form tests, is the only network use, to reach the npm registry.
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -8,10 +9,11 @@ import { cp, link, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:
 import { createServer, get } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { test } from 'node:test'
+import { after, test } from 'node:test'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { assemblePrompt, fillSentence, hasUnfilledBlank, isFinishedPrompt } from '../challenges/vibe-coding-mad-libs/prompt.mjs'
+import { parseDiceSheet, readDiceTables } from '../challenges/vibe-coding-mad-libs/dice.mjs'
+import { FIELDS, assemblePrompt, fillSentence, hasUnfilledBlank, isFinishedPrompt } from '../challenges/vibe-coding-mad-libs/prompt.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const packageDirectory = path.join(testDirectory, '..', 'challenges', 'vibe-coding-mad-libs')
@@ -20,6 +22,14 @@ const serverExitTimeoutMilliseconds = 5_000
 
 const filledAnswers = { theme: 'game', subject: 'cats', audience: 'kids', style: 'retro' }
 
+/** Options for a test that may pay for the shared install. */
+const installedPackageTest = { timeout: installTimeoutMilliseconds + 60_000 }
+
+const diceSheetPath = path.join(packageDirectory, 'dice-sheet.md')
+
+const keys = { enter: '\r', escape: '\x1b', tab: '\t' }
+const reverseVideo = '\x1b[7m'
+
 /** Makes a fresh temporary directory that `context` removes when the test ends. */
 const makeTemporaryDirectory = async (context) => {
   const directory = await mkdtemp(path.join(tmpdir(), 'mad-libs-test-'))
@@ -27,6 +37,95 @@ const makeTemporaryDirectory = async (context) => {
 
   return directory
 }
+
+let installedPackage
+let installRoot
+after(() => installRoot && rm(installRoot, { recursive: true, force: true }))
+
+/**
+ * Copies the package without its node_modules and runs its install hook
+ * through a symlink, as a station may reach its package through one (macOS's
+ * /tmp is one). Runs once per test run and resolves with the copy's real
+ * directory; throws with install's stderr when it fails.
+ */
+const installPackageOnce = () => {
+  installedPackage ??= (async () => {
+    installRoot = await mkdtemp(path.join(tmpdir(), 'mad-libs-test-'))
+    const copy = path.join(installRoot, 'package')
+    const linked = path.join(installRoot, 'linked-package')
+    await cp(packageDirectory, copy, { recursive: true, filter: (source) => path.basename(source) !== 'node_modules' })
+    await symlink(copy, linked)
+
+    const installed = await runExecutable(path.join(linked, 'install'), [], { timeout: installTimeoutMilliseconds })
+    if (installed.code !== 0) throw new Error(`install failed: ${installed.stderr}`)
+
+    return copy
+  })()
+
+  return installedPackage
+}
+
+/** A theme that marks each color by name, so a test can see what is muted. */
+const markingTheme = {
+  fg: (color, text) => `<${color}>${text}</${color}>`,
+  bold: (text) => text,
+}
+
+/** Pi's submit and cancel keybindings, at their default keys. */
+const defaultKeybindings = {
+  matches: (data, keybinding) => ({ 'tui.input.submit': keys.enter, 'tui.select.cancel': keys.escape })[keybinding] === data,
+}
+
+/**
+ * Loads the extension from the installed copy with a fake Pi, runs
+ * /mad-libs, and returns the open form, the values it closed with, and a
+ * `screen()` that renders it 100 columns wide.
+ */
+const openMadLibsForm = async () => {
+  const { default: madLibs } = await import(pathToFileURL(path.join(await installPackageOnce(), 'mad-libs.mjs')))
+  const commands = new Map()
+  madLibs({ registerCommand: (name, command) => commands.set(name, command), on: () => {}, sendUserMessage: () => {} })
+  const closedWith = []
+  let form
+  const ctx = {
+    mode: 'tui',
+    isIdle: () => true,
+    sessionManager: { getBranch: () => [] },
+    ui: {
+      notify: () => {},
+      custom: (factory) => new Promise((resolve) => {
+        const done = (value) => {
+          closedWith.push(value)
+          resolve(value)
+        }
+        form = factory({ requestRender: () => {} }, markingTheme, defaultKeybindings, done)
+      }),
+    },
+  }
+
+  commands.get('mad-libs').handler('', ctx)
+
+  return { form, closedWith, screen: () => form.render(100) }
+}
+
+/** Moves focus from the first field to Roll dice and presses it. */
+const openDiceView = (form) => press(form, keys.tab, keys.tab, keys.tab, keys.tab, keys.tab, keys.enter)
+
+/** Lists every `| roll | option |` row of `markdown` as "roll option". */
+const diceRows = (markdown) => [...markdown.matchAll(/^\| (\d+) \| (.+?) \|$/gm)].map(([, roll, option]) => `${roll} ${option}`)
+
+/** Builds a dice sheet in dice-sheet.md's format; `tables` overrides a field's rows by label. */
+const buildDiceSheet = (tables = {}) => FIELDS.map(({ label }) => {
+  const rows = tables[label] ?? [[1, `${label} one`], [2, `${label} two`]]
+
+  return [`## ${label} (d2)`, '', '| Roll | Option |', '| --- | --- |', ...rows.map(([roll, option]) => `| ${roll} | ${option} |`)].join('\n')
+}).join('\n\n')
+
+/** Sends each of `inputs` to `form` as a separate key press or typed text. */
+const press = (form, ...inputs) => inputs.forEach((input) => form.handleInput(input))
+
+/** The line drawn just under the label of the field named `label`. */
+const fieldLine = (lines, label) => lines[lines.findIndex((line) => line.endsWith(` ${label}`)) + 1]
 
 /** Asks the operating system for a port nothing listens on right now. */
 const findFreePort = () => new Promise((resolve, reject) => {
@@ -211,20 +310,14 @@ for (const { name, text, finished } of finishedPromptCases) {
   })
 }
 
-test('loads the extension under the pinned Pi packages after install through a symlink', { timeout: installTimeoutMilliseconds + 60_000 }, async (context) => {
-  const installedPackage = path.join(await makeTemporaryDirectory(context), 'package')
-  await cp(packageDirectory, installedPackage, { recursive: true, filter: (source) => path.basename(source) !== 'node_modules' })
-  // A station can reach its package through a symlink, as macOS's /tmp is one.
-  const linkedPackage = path.join(await makeTemporaryDirectory(context), 'linked-package')
-  await symlink(installedPackage, linkedPackage)
-  const installed = await runExecutable(path.join(linkedPackage, 'install'), [], { timeout: installTimeoutMilliseconds })
-  assert.equal(installed.code, 0, installed.stderr)
+test('loads the extension under the pinned Pi packages after install through a symlink', installedPackageTest, async (context) => {
+  const installed = await installPackageOnce()
   const projectDirectory = await makeTemporaryDirectory(context)
   const agentDirectory = await makeTemporaryDirectory(context)
-  const piDirectory = path.join(installedPackage, 'node_modules', '@earendil-works', 'pi-coding-agent')
+  const piDirectory = path.join(installed, 'node_modules', '@earendil-works', 'pi-coding-agent')
   const pi = await import(pathToFileURL(path.join(piDirectory, 'dist', 'index.js')))
 
-  const { extensions, errors } = await pi.discoverAndLoadExtensions([path.join(installedPackage, 'mad-libs.mjs')], projectDirectory, agentDirectory)
+  const { extensions, errors } = await pi.discoverAndLoadExtensions([path.join(installed, 'mad-libs.mjs')], projectDirectory, agentDirectory)
 
   const piManifest = JSON.parse(await readFile(path.join(piDirectory, 'package.json'), 'utf8'))
   assert.equal(piManifest.version, '1.0.4')
@@ -235,6 +328,80 @@ test('loads the extension under the pinned Pi packages after install through a s
     assert.ok(extensions[0].handlers.has(eventName), `no ${eventName} handler`)
   }
 })
+
+test('the form draws every placeholder muted', installedPackageTest, async () => {
+  const { form, screen } = await openMadLibsForm()
+
+  press(form, keys.tab, keys.tab, keys.tab, keys.tab)
+  const lines = screen()
+
+  for (const { label, placeholder } of FIELDS) {
+    assert.equal(fieldLine(lines, label), `<muted>${placeholder}</muted>`)
+  }
+})
+
+test('the form draws a cursor only in the focused field, over a muted placeholder', installedPackageTest, async () => {
+  const { form, screen } = await openMadLibsForm()
+
+  press(form, 'game', keys.tab)
+  const lines = screen()
+
+  assert.deepEqual(lines.filter((line) => line.includes(reverseVideo)), [fieldLine(lines, 'Subject')])
+  assert.match(fieldLine(lines, 'Subject'), /<muted>hat it is about<\/muted>/)
+  assert.equal(fieldLine(lines, 'Theme'), 'game')
+})
+
+test('reads the four dice tables from dice-sheet.md in field order', () => {
+  const tables = readDiceTables()
+
+  assert.deepEqual(tables.map(({ field, die, options }) => [field.key, die, options.length]), [
+    ['theme', 'd6', 6],
+    ['subject', 'd6', 6],
+    ['audience', 'd20', 20],
+    ['style', 'd20', 20],
+  ])
+  assert.equal(tables[0].options[0], 'Dashboard')
+  assert.equal(tables[3].options[19], 'Neon Noir')
+})
+
+const brokenDiceSheetCases = [
+  { name: 'a field has no table', markdown: buildDiceSheet().replace(/## Style[^]*$/, ''), error: /Style/ },
+  { name: 'a roll is skipped', markdown: buildDiceSheet({ Theme: [[1, 'one'], [3, 'three']] }), error: /Theme/ },
+  { name: 'the rolls do not match the die', markdown: buildDiceSheet({ Subject: [[1, 'one']] }), error: /Subject/ },
+]
+
+for (const { name, markdown, error } of brokenDiceSheetCases) {
+  test(`refuses a dice sheet where ${name}`, () => {
+    assert.throws(() => parseDiceSheet(markdown), error)
+  })
+}
+
+test('Roll dice shows every row of dice-sheet.md, compactly by field', installedPackageTest, async () => {
+  const { form, screen } = await openMadLibsForm()
+
+  openDiceView(form)
+  const shown = screen().join(' ').replaceAll('\u00a0', ' ')
+
+  assert.match(shown, /Theme \(d6\): 1 Dashboard · 2 Game · 3 Generator/)
+  for (const row of diceRows(await readFile(diceSheetPath, 'utf8'))) {
+    assert.ok(shown.includes(row), `the dice view leaves out "${row}"`)
+  }
+})
+
+for (const key of ['enter', 'escape']) {
+  test(`${key} in the dice view goes back to the fields, keeping the draft and the form open`, installedPackageTest, async () => {
+    const { form, closedWith, screen } = await openMadLibsForm()
+    press(form, 'game')
+    openDiceView(form)
+
+    press(form, keys[key])
+    const lines = screen()
+
+    assert.deepEqual(closedWith, [])
+    assert.match(lines.join('\n'), /Fill in the blanks/)
+    assert.equal(fieldLine(lines, 'Theme'), 'game')
+  })
+}
 
 test('setup copies the dice sheet and serves the waiting page', async (context) => {
   const port = await findFreePort()
