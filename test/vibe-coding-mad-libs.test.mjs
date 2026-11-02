@@ -1,11 +1,12 @@
 // Proves the vibe-coding-mad-libs package: prompt assembly, the extension
-// loading under its pinned Pi packages, the form it draws, and the setup and
-// cleanup hooks. Installing a copy of the package, shared by the extension and
-// form tests, is the only network use, to reach the npm registry.
+// loading under its pinned Pi packages, the form it draws, the setup and
+// cleanup hooks, and the gallery screenshot helper. Installing a copy of the
+// package, shared by the extension and form tests, is the only network use,
+// to reach the npm registry.
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { cp, link, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, link, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { createServer, get } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -14,6 +15,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { parseDiceSheet, readDiceTables } from '../challenges/vibe-coding-mad-libs/dice.mjs'
 import { FIELDS, assemblePrompt, fillSentence, hasUnfilledBlank, isFinishedPrompt } from '../challenges/vibe-coding-mad-libs/prompt.mjs'
+import { findChrome, saveScreenshot } from '../challenges/vibe-coding-mad-libs/screenshot.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
 const packageDirectory = path.join(testDirectory, '..', 'challenges', 'vibe-coding-mad-libs')
@@ -588,4 +590,223 @@ test('cleanup exits 0 when the workspace does not exist', async (context) => {
   const cleanup = await runHook('cleanup', path.join(parent, 'missing'), port)
 
   assert.equal(cleanup.code, 0, cleanup.stderr)
+})
+
+/** The Chrome the screenshot helper would use here, or undefined when none is installed. */
+const installedChrome = (() => {
+  try {
+    return findChrome()
+  } catch {
+    return undefined
+  }
+})()
+
+/** The screenshot helper's command line for the preview on `port`. */
+const screenshotArguments = (port) => [path.join(packageDirectory, 'screenshot.mjs'), `http://127.0.0.1:${port}/`]
+
+/** Runs the screenshot helper in `workspace` against the preview on `port`; `environment` adds variables. */
+const runScreenshot = (workspace, port, environment = {}) => runExecutable(process.execPath, screenshotArguments(port), {
+  cwd: workspace,
+  env: { ...process.env, ...environment },
+})
+
+/**
+ * Makes an empty TMPDIR deeper than the Unix socket path limit, as a
+ * station's session TMPDIR is, so Chrome would abort if it put its singleton
+ * socket there.
+ */
+const makeDeepTemporaryDirectory = async (context) => {
+  const deep = path.join(await makeTemporaryDirectory(context), 'a-station-session-root', 'deep-enough-to-pass-the-unix-socket-path-limit', 'sandbox', 'tmp')
+  await mkdir(deep, { recursive: true })
+  // Chrome's socket adds about 45 characters to TMPDIR; the limit is 104 to 108.
+  assert.ok(deep.length > 70, `${deep} is too short to pass the socket limit`)
+
+  return deep
+}
+
+/**
+ * Writes an executable that stands in for a Chrome that never opens DevTools:
+ * it saves its pid to `pid` beside itself, then sleeps. Returns its path and
+ * the pid file's.
+ */
+const writeHangingChrome = async (directory) => {
+  const executable = path.join(directory, 'hanging-chrome')
+  const pidFile = path.join(directory, 'pid')
+  await writeFile(executable, `#!/bin/sh\necho $$ > '${pidFile}'\nexec sleep 60\n`)
+  await chmod(executable, 0o755)
+
+  return { executable, pidFile }
+}
+
+/** Polls until `file` exists, failing the test if it never does. */
+const waitForFile = async (file) => {
+  const deadline = Date.now() + serverExitTimeoutMilliseconds
+  while (!(await exists(file))) {
+    assert.ok(Date.now() < deadline, `${file} never appeared`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
+/** True while `pid` runs; a zombie waiting to be reaped has stopped. */
+const isRunning = async (pid) => {
+  const state = await readProcessColumn('stat', pid)
+
+  return state !== '' && !state.startsWith('Z')
+}
+
+/** Polls until `pid` has stopped, failing the test if it never does. */
+const waitUntilStopped = async (pid) => {
+  const deadline = Date.now() + serverExitTimeoutMilliseconds
+  while (await isRunning(pid)) {
+    assert.ok(Date.now() < deadline, `process ${pid} is still running`)
+    await new Promise((resolve) => setTimeout(resolve, 20))
+  }
+}
+
+/** Points TMPDIR at `directory` for this process until the test ends. */
+const useTemporaryDirectory = (context, directory) => {
+  const previous = process.env.TMPDIR
+  process.env.TMPDIR = directory
+  context.after(() => {
+    if (previous === undefined) delete process.env.TMPDIR
+    else process.env.TMPDIR = previous
+  })
+}
+
+/** Starts the preview for a fresh workspace holding a small app, returning the workspace and port. */
+const startPreviewWithApp = async (context) => {
+  const port = await findFreePort()
+  const workspace = await makeWorkspace(context, port)
+  const setup = await runHook('setup', workspace, port)
+  assert.equal(setup.code, 0, setup.stderr)
+  await writeFile(path.join(workspace, 'index.html'), '<!doctype html><title>Cat game</title><body style="background:gold"><h1>Cat game</h1><button>Pet</button></body>')
+
+  return { workspace, port }
+}
+
+/** Reads a PNG's width and height from its header, failing the test when `bytes` isn't a PNG. */
+const readPngSize = (bytes) => {
+  assert.deepEqual([...bytes.subarray(0, 8)], [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 'not a PNG')
+
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+}
+
+/** Writes an executable that stands in for Chrome and exits at once with status 3. */
+const writeCrashingChrome = async (directory) => {
+  const executable = path.join(directory, 'crashing-chrome')
+  await writeFile(executable, '#!/bin/sh\nexit 3\n')
+  await chmod(executable, 0o755)
+
+  return executable
+}
+
+const findChromeCases = [
+  { name: 'CHROME_PATH when it exists', variable: 'chrome', installed: ['other'], expected: 'chrome' },
+  { name: 'the first standard install that exists when CHROME_PATH is unset', variable: undefined, installed: ['other'], expected: 'other' },
+  { name: 'the first standard install that exists when CHROME_PATH is empty', variable: '', installed: ['other'], expected: 'other' },
+]
+
+for (const { name, variable, installed, expected } of findChromeCases) {
+  test(`findChrome picks ${name}`, async (context) => {
+    const directory = await makeTemporaryDirectory(context)
+    await Promise.all(['chrome', 'other'].map((file) => writeFile(path.join(directory, file), '')))
+    const environment = variable === undefined ? {} : { CHROME_PATH: variable && path.join(directory, variable) }
+    const candidates = [path.join(directory, 'missing'), ...installed.map((file) => path.join(directory, file))]
+
+    const chrome = findChrome(environment, candidates)
+
+    assert.equal(chrome, path.join(directory, expected))
+  })
+}
+
+test('findChrome names CHROME_PATH when it points at a missing file', () => {
+  assert.throws(() => findChrome({ CHROME_PATH: '/no/such/chrome' }, []), /CHROME_PATH is \/no\/such\/chrome, which does not exist/)
+})
+
+test('findChrome asks for CHROME_PATH when no Chrome is installed', () => {
+  assert.throws(() => findChrome({}, ['/no/such/chrome']), /set CHROME_PATH/)
+})
+
+test('the screenshot helper saves the app as a 1280x800 PNG under a deep TMPDIR, leaving TMPDIR empty', async (context) => {
+  if (!installedChrome) return context.skip('no Google Chrome installed; set CHROME_PATH to run it')
+  const { workspace, port } = await startPreviewWithApp(context)
+  const temporaryDirectory = await makeDeepTemporaryDirectory(context)
+
+  const screenshot = await runScreenshot(workspace, port, { TMPDIR: temporaryDirectory })
+
+  assert.equal(screenshot.code, 0, screenshot.stderr)
+  assert.match(screenshot.stdout, /Saved screenshot\.png/)
+  assert.deepEqual(readPngSize(await readFile(path.join(workspace, 'screenshot.png'))), { width: 1280, height: 800 })
+  assert.deepEqual(await readdir(temporaryDirectory), [])
+})
+
+test('the screenshot helper replaces a screenshot.png link instead of writing through it', async (context) => {
+  if (!installedChrome) return context.skip('no Google Chrome installed; set CHROME_PATH to run it')
+  const { workspace, port } = await startPreviewWithApp(context)
+  const outside = path.join(await makeTemporaryDirectory(context), 'outside.txt')
+  await writeFile(outside, 'keep me')
+  await symlink(outside, path.join(workspace, 'screenshot.png'))
+
+  const screenshot = await runScreenshot(workspace, port)
+
+  assert.equal(screenshot.code, 0, screenshot.stderr)
+  assert.equal(await readFile(outside, 'utf8'), 'keep me')
+  assert.deepEqual(readPngSize(await readFile(path.join(workspace, 'screenshot.png'))), { width: 1280, height: 800 })
+})
+
+test('the screenshot helper fails naming the URL when the preview is not answering, and writes nothing', async (context) => {
+  const port = await findFreePort()
+  const workspace = await makeTemporaryDirectory(context)
+
+  const screenshot = await runScreenshot(workspace, port)
+
+  assert.equal(screenshot.code, 1)
+  assert.match(screenshot.stderr, new RegExp(`http://127\\.0\\.0\\.1:${port}/ is not answering`))
+  assert.equal(await exists(path.join(workspace, 'screenshot.png')), false)
+})
+
+test('the screenshot helper fails when Chrome exits before opening DevTools, and writes nothing', async (context) => {
+  const { workspace, port } = await startPreviewWithApp(context)
+  const chrome = await writeCrashingChrome(await makeTemporaryDirectory(context))
+
+  const screenshot = await runScreenshot(workspace, port, { CHROME_PATH: chrome })
+
+  assert.equal(screenshot.code, 1)
+  assert.match(screenshot.stderr, /Chrome exited \(code 3\) before opening DevTools/)
+  assert.equal(await exists(path.join(workspace, 'screenshot.png')), false)
+})
+
+test('the screenshot helper gives up on a Chrome that never opens DevTools, stopping it and removing its profile', async (context) => {
+  const { port } = await startPreviewWithApp(context)
+  const chrome = await writeHangingChrome(await makeTemporaryDirectory(context))
+  const outputPath = path.join(await makeTemporaryDirectory(context), 'screenshot.png')
+  const temporaryDirectory = await makeTemporaryDirectory(context)
+  useTemporaryDirectory(context, temporaryDirectory)
+
+  const saving = saveScreenshot({ url: `http://127.0.0.1:${port}/`, outputPath, environment: { CHROME_PATH: chrome.executable }, timeoutMs: 1_000 })
+
+  await assert.rejects(saving, /the screenshot took longer than 1000 ms/)
+  await waitUntilStopped(Number(await readFile(chrome.pidFile, 'utf8')))
+  assert.deepEqual(await readdir(temporaryDirectory), [])
+  assert.equal(await exists(outputPath), false)
+})
+
+test('the screenshot helper stops Chrome and removes its profile when interrupted', async (context) => {
+  const { workspace, port } = await startPreviewWithApp(context)
+  const chrome = await writeHangingChrome(await makeTemporaryDirectory(context))
+  const temporaryDirectory = await makeTemporaryDirectory(context)
+  const helper = spawn(process.execPath, screenshotArguments(port), {
+    cwd: workspace,
+    env: { ...process.env, CHROME_PATH: chrome.executable, TMPDIR: temporaryDirectory },
+    stdio: 'ignore',
+  })
+  const exited = new Promise((resolve) => helper.once('exit', resolve))
+  await waitForFile(chrome.pidFile)
+
+  helper.kill('SIGTERM')
+
+  assert.equal(await exited, 1)
+  await waitUntilStopped(Number(await readFile(chrome.pidFile, 'utf8')))
+  assert.deepEqual(await readdir(temporaryDirectory), [])
+  assert.equal(await exists(path.join(workspace, 'screenshot.png')), false)
 })

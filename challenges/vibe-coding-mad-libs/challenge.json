@@ -31,5 +31,8 @@
       "hint": "Ask Pi for one change, then try the updated app.",
       "done_when": "Pi made one change the participant asked for to index.html, and the participant confirmed they tried the updated app."
     }
-  ]
+  ],
+  "gallery": {
+    "kinds": ["app"]
+  }
 }
