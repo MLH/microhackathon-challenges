@@ -41,15 +41,19 @@ starts (after `session_info`, when you have it): call `show_preview` with
 `http://127.0.0.1:4322/` without asking first. Without `show_preview`, give
 them that URL to open right away.
 
+Whenever `show_preview` returns `offered`, a dialog is still asking the
+participant whether to open the page. Say "Click **Open preview** to start
+drawing." Never say the page is open until a call returns `navigated`.
+
 When you resume with `draw-bird` not yet complete, first use `bash` to check
 whether `bird.png` exists in the current directory: a save made just before
 a restart sends no message. If it exists, go straight to step 2.
 
-Tell them to draw any bird, then press Save. Saving tells you on its own, as
-a `[birdsbirdbirds]` message. If they say they saved but no message came, use
-`bash` to check that `bird.png` exists in the current directory; if it
-doesn't, ask them to press Save and look again. When it exists, go on to
-step 2.
+Tell them to draw any bird, then press **Save my bird**; always call the
+button that. Saving tells you on its own, as a `[birdsbirdbirds]` message. If
+they say they saved but no message came, use `bash` to check that `bird.png`
+exists in the current directory; if it doesn't, ask them to press **Save my
+bird** and look again. When it exists, go on to step 2.
 
 ## 2. Meet the bird
 
@@ -111,18 +115,22 @@ checker or edit it. When it passes, report `animate`.
 
 The drawing page switches to the sky on its own once a valid `bird.json`
 exists. Tell the participant to look at it (call `show_preview` again if the
-page was closed). They can press "Draw again" to redraw; if they do, start
+page was closed; on `offered`, say "Click **Open preview** to watch it
+fly."). They can press "Draw again" to redraw; if they do, start
 again at step 1.
 
 Ask how the flight looks and offer one tweak, such as faster, higher, or
 more wobbly. If they want it, edit `bird.json`, rerun the checker, and let
-them watch again. When they say they've watched it fly, report `fly`.
+them watch again. When they say they've watched it fly, go on to step 5;
+`fly` is the last step, and reporting it moves the participant's focus to
+Finish, so it waits for the gallery answer.
 
 ## 5. Gallery
 
-Only with `publish_gallery_item`. Use the display name from `session_info`
-and ask: "Want this on the booth screens? It'll show with your name,
-[display name], and staff can remove it at any time."
+Only with `publish_gallery_item`; without it, or if you already published
+this bird in this conversation, skip to step 6. Use the display
+name from `session_info` and ask: "Want this on the booth screens? It'll show
+with your name, [display name], and staff can remove it at any time."
 
 On a yes, run the checker once more, then `read` `bird.json` and call
 `publish_gallery_item` with:
@@ -134,3 +142,9 @@ On a yes, run the checker once more, then `read` `bird.json` and call
 - `payload`: exactly the object you just read from `bird.json`
 
 On a no, move on without publishing.
+
+## 6. Finish
+
+Report `fly`. With `report_step`, end with the finish line, naming the
+points: "All steps are done. Press Enter, or choose Finish, to claim your 150
+pts." Finish closes the page, so don't invite them to keep watching it.

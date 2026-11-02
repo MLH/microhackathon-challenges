@@ -42,6 +42,11 @@ const toSkyButton = document.getElementById('to-sky-button')
 const drawAgainButton = document.getElementById('draw-again-button')
 const sky = document.getElementById('sky')
 
+// The starting prompt is written once, in index.html, and read back here.
+const INITIAL_PROMPT = statusLine.textContent
+const DRAWN_PROMPT = 'Looking good! Press Save my bird when it’s done.'
+const EMPTY_CANVAS_ERROR = 'The canvas is empty. Draw your bird first!'
+
 const pen = { colour: COLOURS[0].value, width: PEN_SIZES[1].width, erasing: false }
 const stroke = { pointerId: undefined, lastPoint: undefined }
 const undoSnapshots = []
@@ -191,6 +196,17 @@ function endStroke(event) {
 
   stroke.pointerId = undefined
   stroke.lastPoint = undefined
+  promptToSave()
+}
+
+/**
+ * Swaps the initial prompt, or the empty-canvas error, for a nudge to save
+ * once there is a drawing. Any other message (Undone, Cleared, Saved, a save
+ * failure) is left alone, since it reports something the attendee just did.
+ */
+function promptToSave() {
+  const showsPreDrawingMessage = statusLine.textContent === INITIAL_PROMPT || statusLine.textContent === EMPTY_CANVAS_ERROR
+  if (showsPreDrawingMessage && !isCanvasBlank()) setStatus(DRAWN_PROMPT)
 }
 
 /** Clears the canvas to transparent, undoably. */
@@ -219,7 +235,7 @@ function canvasToPng() {
 
 /** Saves the drawing to the workspace as bird.png and reports how it went. */
 async function saveBird() {
-  if (isCanvasBlank()) return setStatus('The canvas is empty. Draw your bird first!', 'error')
+  if (isCanvasBlank()) return setStatus(EMPTY_CANVAS_ERROR, 'error')
 
   saveButton.disabled = true
   setStatus('Saving…')
@@ -281,6 +297,7 @@ function showDraw() {
   skyMode.hidden = true
   drawMode.hidden = false
   sky.replaceChildren()
+  setStatus(isCanvasBlank() ? INITIAL_PROMPT : DRAWN_PROMPT)
   toSkyButton.hidden = flight.entry === undefined
 }
 

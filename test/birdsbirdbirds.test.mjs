@@ -721,6 +721,7 @@ test('the server does not serve a symlinked bird.png', (testContext) => withWork
   const response = await sendRequest({ port, requestPath: '/bird.png' })
 
   assert.equal(response.status, 422)
+  assert.match(response.body.toString(), /press Save my bird on the drawing page again/)
 }))
 
 test('the server does not serve a bird.png over the size cap', (testContext) => withWorkspace(async ({ workspace }) => {
