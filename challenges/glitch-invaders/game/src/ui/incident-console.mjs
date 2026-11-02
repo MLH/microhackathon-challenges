@@ -40,6 +40,8 @@ export class IncidentConsole {
   evidence = null;
   diagnosisFeedback = '';
   patchObservation = null;
+  /** The last revealed hint's list item in the rendered diagnosis pane, if any. */
+  newestHint = null;
 
   constructor(host) {
     this.host = host;
@@ -298,8 +300,11 @@ export class IncidentConsole {
   diagnosePane(progress) {
     const definition = BUG_DEFINITIONS[this.bug];
     const solved = progress.stage === 'investigated' || progress.stage === 'repaired';
-    const hints = definition.hints.slice(0, progress.hintsUsed);
+    const hintItems = definition.hints
+      .slice(0, progress.hintsUsed)
+      .map((hint) => h('li', {}, hint));
     const nextHint = progress.hintsUsed < definition.hints.length;
+    this.newestHint = hintItems.at(-1) ?? null;
 
     const content = h(
       'div',
@@ -331,13 +336,9 @@ export class IncidentConsole {
           return onClick(button, () => this.answer(option.id));
         }),
       ),
-      hints.length === 0
+      hintItems.length === 0
         ? null
-        : h(
-            'ol',
-            { class: 'hints', 'aria-label': 'Hints' },
-            ...hints.map((hint) => h('li', {}, hint)),
-          ),
+        : h('ol', { class: 'hints', 'aria-label': 'Hints' }, ...hintItems),
     );
 
     return {
@@ -364,6 +365,7 @@ export class IncidentConsole {
               () => {
                 this.host.useHint(this.bug);
                 this.render();
+                this.newestHint?.scrollIntoView({ block: 'nearest' });
               },
             ),
         solved

@@ -41,6 +41,8 @@ import {
   LiveEvidenceProvider,
 } from '../challenges/glitch-invaders/game/src/diagnostics/live-evidence.mjs';
 import { InputController, TAP_MOVE_MS } from '../challenges/glitch-invaders/game/src/ui/input.mjs';
+import { IncidentConsole } from '../challenges/glitch-invaders/game/src/ui/incident-console.mjs';
+import { completionCard } from '../challenges/glitch-invaders/game/src/ui/overlays.mjs';
 import { Hud } from '../challenges/glitch-invaders/game/src/ui/hud.mjs';
 import { BossLoadingView } from '../challenges/glitch-invaders/game/src/ui/boss-loading.mjs';
 import { SimulatedEvidenceProvider } from '../challenges/glitch-invaders/game/src/diagnostics/simulated-evidence.mjs';
@@ -1778,46 +1780,99 @@ test('the evidence lookup shares one Sentry lookup among concurrent requests for
   );
 });
 
-/** A DOM element stand-in that records every write the page code makes to it. */
+/**
+ * A DOM element stand-in that records every write the page code makes to it. It keeps its
+ * children, attributes, and listeners, and reads a style back normalized as a browser does.
+ */
 class RecordingElement {
   writes = [];
   hidden = false;
-  #textContent = '';
+  children = [];
+  attributes = new Map();
+  listeners = new Map();
+  scrolledIntoView = [];
   dataset;
   style;
 
   constructor() {
-    this.dataset = this.#recordingBag('dataset');
-    this.style = this.#recordingBag('style');
+    this.dataset = this.#recordingBag('dataset', (value) => value);
+    this.style = this.#recordingBag('style', normalizedCssValue);
   }
 
   get textContent() {
-    return this.#textContent;
+    return this.children
+      .map((child) => (typeof child === 'string' ? child : child.textContent))
+      .join('');
   }
 
   set textContent(text) {
     this.writes.push(`textContent=${text}`);
-    this.#textContent = text;
+    this.children = [text];
   }
 
-  setAttribute() {}
+  setAttribute(name, value) {
+    this.attributes.set(name, value);
+  }
 
-  append() {}
+  getAttribute(name) {
+    return this.attributes.get(name) ?? null;
+  }
 
-  replaceChildren() {}
+  append(...children) {
+    this.children.push(...children);
+  }
 
-  #recordingBag(label) {
+  replaceChildren(...children) {
+    this.children = children;
+  }
+
+  addEventListener(name, listener) {
+    this.listeners.set(name, [...(this.listeners.get(name) ?? []), listener]);
+  }
+
+  click() {
+    for (const listener of this.listeners.get('click') ?? []) {
+      listener({ detail: 1 });
+    }
+  }
+
+  scrollIntoView(options) {
+    this.scrolledIntoView.push(options);
+  }
+
+  #recordingBag(label, readBack) {
     const values = {};
 
     return new Proxy(values, {
       set: (target, name, value) => {
         this.writes.push(`${label}.${name}=${value}`);
-        target[name] = value;
+        target[name] = readBack(value);
 
         return true;
       },
     });
   }
+}
+
+/** A CSS value as a browser reads it back from an inline style: `100.0%` returns as `100%`. */
+function normalizedCssValue(value) {
+  return String(value).replace(/(\d)\.0+(?=\D|$)/g, '$1');
+}
+
+/** The first element in `root`'s tree, `root` included, whose `name` attribute is `value`. */
+function findByAttribute(root, name, value) {
+  if (root.getAttribute(name) === value) {
+    return root;
+  }
+
+  for (const child of root.children) {
+    const found = typeof child === 'string' ? null : findByAttribute(child, name, value);
+    if (found !== null) {
+      return found;
+    }
+  }
+
+  return null;
 }
 
 /** Run `body` with a page whose elements are {@link RecordingElement}s, by id as the HUD asks. */
@@ -1896,49 +1951,183 @@ test('an idle frame writes nothing to the boss loading panel', () => {
   });
 });
 
-test('the HUD badge says LIVE until a report falls back, then SIMULATED, then LIVE again on live evidence', () => {
+test('a finished load bar is written once, though the browser reads 100.0% back as 100%', () => {
+  withRecordingPage(() => {
+    const view = new BossLoadingView(new RecordingElement());
+    const world = hudWorld({
+      phase: 'boss-loading',
+      bossLoad: { startedAt: 0, tasks: [{ name: 'textures', startMs: 0, endMs: 400 }] },
+    });
+    view.update(world, 500);
+    const fill = view.rows.get('textures').fill;
+    fill.writes.length = 0;
+
+    view.update(world, 600);
+
+    assert.deepEqual(fill.writes, []);
+  });
+});
+
+test('the HUD badge says LIVE in live mode', () => {
   withRecordingPage((page) => {
     const hud = new Hud();
     const badge = page.getElementById('mode-badge');
+
     hud.showLiveMode();
-    assert.equal(badge.textContent, 'LIVE · Sentry');
 
-    hud.showEvidenceSource({ source: 'fallback' });
-    assert.match(badge.textContent, /^SIMULATED/);
-    assert.equal(badge.dataset.mode, 'simulated');
-
-    hud.showEvidenceSource({ source: 'live' });
     assert.equal(badge.textContent, 'LIVE · Sentry');
     assert.equal(badge.dataset.mode, 'live');
   });
 });
 
-test('a quick tap on a move pad carries the ship a lane, and fire stays a plain hold', (testContext) => {
-  testContext.mock.timers.enable({ apis: ['setTimeout'] });
+test('the HUD badge says SIMULATED once a live report falls back to simulated evidence', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const badge = page.getElementById('mode-badge');
+    hud.showLiveMode();
+
+    hud.showEvidenceSource({ source: 'fallback' });
+
+    assert.match(badge.textContent, /^SIMULATED/);
+    assert.equal(badge.dataset.mode, 'simulated');
+  });
+});
+
+test('the HUD badge says LIVE again once evidence comes back live from Sentry', () => {
+  withRecordingPage((page) => {
+    const hud = new Hud();
+    const badge = page.getElementById('mode-badge');
+    hud.showLiveMode();
+    hud.showEvidenceSource({ source: 'fallback' });
+
+    hud.showEvidenceSource({ source: 'live' });
+
+    assert.equal(badge.textContent, 'LIVE · Sentry');
+    assert.equal(badge.dataset.mode, 'live');
+  });
+});
+
+/** An Incident Console on the weapon failure's Diagnose pane, wired to a real tracker as the app is. */
+function consoleOnDiagnosePane() {
+  const tracker = new IncidentTracker(createProgress('test-attempt'));
+  tracker.launch();
+  tracker.encounter('weapon');
+  tracker.markEvidenceViewed('weapon');
+  const incidentConsole = new IncidentConsole({
+    progressOf: (bug) => tracker.progress.bugs[bug],
+    markEvidenceViewed: (bug) => tracker.markEvidenceViewed(bug),
+    useHint: (bug) => tracker.useHint(bug),
+    diagnose: (bug, optionId) => tracker.answerDiagnosis(bug, optionId),
+    applyPatch: () => {},
+  });
+  incidentConsole.open('weapon');
+  findByAttribute(incidentConsole.element, 'data-key', 'tab-diagnose').click();
+
+  return incidentConsole;
+}
+
+test('revealing a hint scrolls the new hint into view in the Incident Console', () => {
+  withRecordingPage(() => {
+    const incidentConsole = consoleOnDiagnosePane();
+
+    findByAttribute(incidentConsole.element, 'data-key', 'hint').click();
+
+    const hints = findByAttribute(incidentConsole.element, 'aria-label', 'Hints');
+    assert.equal(hints.children.length, 1);
+    assert.deepEqual(hints.children[0].scrolledIntoView, [{ block: 'nearest' }]);
+  });
+});
+
+/**
+ * An {@link InputController} with left, right, and fire pads on a controlled clock; `press` and
+ * `release` send a pad the pointer events a browser would, for pointer 1 unless named.
+ */
+function padHarness(testContext) {
+  testContext.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
   const input = new InputController({ isGameActive: () => true, onPauseKey: () => {} });
   const listeners = new Map();
-  const pad = (control) => {
+  for (const control of ['left', 'right', 'fire']) {
     const button = { addEventListener: (name, listener) => listeners.set(`${control}:${name}`, listener) };
     input.attachPad(control, button);
+  }
+  const send = (control, name, pointerId) =>
+    listeners.get(`${control}:${name}`)({ preventDefault: () => {}, pointerId });
+
+  return {
+    input,
+    press: (control, pointerId = 1) => send(control, 'pointerdown', pointerId),
+    release: (control, name = 'pointerup', pointerId = 1) => send(control, name, pointerId),
+    tick: (milliseconds) => testContext.mock.timers.tick(milliseconds),
   };
-  pad('left');
-  pad('fire');
-  const event = { preventDefault: () => {} };
+}
 
-  listeners.get('left:pointerdown')(event);
-  listeners.get('left:pointerup')(event);
-  const heldRightAfterTap = input.current().left;
-  testContext.mock.timers.tick(TAP_MOVE_MS - 1);
-  const heldJustBeforeLaneEnd = input.current().left;
-  testContext.mock.timers.tick(1);
-  listeners.get('fire:pointerdown')(event);
-  listeners.get('fire:pointerup')(event);
-
-  assert.equal(heldRightAfterTap, true);
-  assert.equal(heldJustBeforeLaneEnd, true);
-  assert.equal(input.current().left, false);
-  assert.equal(input.current().fire, false);
+test('a tap lasts long enough to move the ship well beyond 25 px', () => {
   assert.ok(TAP_MOVE_MS >= 150, `a tap must move well beyond 25 px, got ${TAP_MOVE_MS} ms`);
+});
+
+test('a quick tap on a move pad keeps the ship moving until a full lane has passed', (testContext) => {
+  const pads = padHarness(testContext);
+
+  pads.press('left');
+  pads.release('left');
+  pads.tick(TAP_MOVE_MS - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('a quick tap on a move pad stops the ship once the lane is covered', (testContext) => {
+  const pads = padHarness(testContext);
+
+  pads.press('left');
+  pads.release('left');
+  pads.tick(TAP_MOVE_MS);
+
+  assert.equal(pads.input.current().left, false);
+});
+
+test('the pointerleave a touch sends after pointerup does not cut a tap short', (testContext) => {
+  const pads = padHarness(testContext);
+
+  pads.press('left');
+  pads.release('left', 'pointerup');
+  pads.release('left', 'pointerleave');
+  pads.tick(TAP_MOVE_MS - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('pressing the opposite move pad cancels the pending tap', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('left');
+  pads.release('left');
+
+  pads.press('right', 2);
+
+  assert.equal(pads.input.current().left, false);
+  assert.equal(pads.input.current().right, true);
+});
+
+test('two quick taps on a move pad carry the ship about two lanes', (testContext) => {
+  const pads = padHarness(testContext);
+  const gapMs = 50;
+
+  pads.press('left');
+  pads.release('left');
+  pads.tick(gapMs);
+  pads.press('left');
+  pads.release('left');
+  pads.tick(2 * TAP_MOVE_MS - gapMs - 1);
+
+  assert.equal(pads.input.current().left, true);
+});
+
+test('the fire pad is a plain hold that ends on release', (testContext) => {
+  const pads = padHarness(testContext);
+  pads.press('fire');
+
+  pads.release('fire');
+
+  assert.equal(pads.input.current().fire, false);
 });
 
 test('the monitor state line is visually hidden but still in the accessibility tree', async () => {
@@ -1965,11 +2154,12 @@ test('toasts sit at the top of the arena so they never cover the ship or pickups
   assert.equal(rule.has('bottom'), false);
 });
 
-test('the completion card tells the participant the last step is with Pi', async () => {
-  const overlays = await readFile(
-    path.join(packageDirectory, 'game', 'src', 'ui', 'overlays.mjs'),
-    'utf8',
-  );
+test('the completion card tells the participant the last step is with Pi', () => {
+  withRecordingPage(() => {
+    const progress = createProgress('test-attempt');
 
-  assert.match(overlays, /'Last step: tell Pi which clue helped most\.'/);
+    const card = completionCard(progress);
+
+    assert.match(card.textContent, /Last step: tell Pi which clue helped most\./);
+  });
 });

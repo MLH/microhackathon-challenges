@@ -37,11 +37,23 @@ export function setData(element, name, value) {
   }
 }
 
-/** Set one inline style property only when it changed, so per-frame updates do not churn the DOM. */
+/** The inline style values {@link setStyle} last wrote, per element and property. */
+const writtenStyles = new WeakMap();
+
+/**
+ * Set one inline style property only when it changed, so per-frame updates do not churn the DOM.
+ * It compares with the value it last wrote, not `element.style`, because the browser reads a value
+ * back normalized: `100.0%` returns as `100%`.
+ */
 export function setStyle(element, property, value) {
-  if (element.style[property] !== value) {
-    element.style[property] = value;
+  const written = writtenStyles.get(element) ?? new Map();
+  if (written.get(property) === value) {
+    return;
   }
+
+  element.style[property] = value;
+  written.set(property, value);
+  writtenStyles.set(element, written);
 }
 
 /** Add a click handler and return the element, for chaining inside {@link h} calls. */

@@ -29,7 +29,8 @@ browser ES modules.
 
 ## How steps advance
 
-The game shows a `glitch-state v1` line, and the headless monitor reports
+The game keeps a `glitch-state v1` line, visually hidden but present in the
+page's accessibility snapshot, and the headless monitor reports
 `launch-game`, `fix-weapon`, `fix-shield`, and `fix-boss` from it, as
 [monitor/SKILL.md](monitor/SKILL.md) describes. The game also saves
 `glitch-progress.json` in the workspace (`setup` seeds it with an unplayed run,

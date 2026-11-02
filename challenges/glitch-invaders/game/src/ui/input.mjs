@@ -21,13 +21,21 @@ const KEY_CONTROLS = new Map([
   ['Space', 'fire'],
 ]);
 
+/** The move pad that cancels each move pad's pending tap when pressed. */
+const OPPOSITE_PADS = new Map([
+  ['left', 'right'],
+  ['right', 'left'],
+]);
+
 /** Collects keyboard and pad input. */
 export class InputController {
   state = idleInput();
   keysDown = new Set();
-  padsDown = new Map();
+  /** The pointer IDs holding each pad down, so a stray release from another pointer is ignored. */
+  pointersDown = new Map();
+  /** Each control's timed hold from a tap or a keyboard pulse, as `{ timer, endsAt }`. */
+  timedHolds = new Map();
   options;
-  pulseTimers = new Set();
 
   constructor(options) {
     this.options = options;
@@ -62,28 +70,32 @@ export class InputController {
   /** Let go of everything, such as when a dialog opens or the window loses focus. */
   releaseAll() {
     this.keysDown.clear();
-    this.padsDown.clear();
-    for (const timer of this.pulseTimers) {
-      clearTimeout(timer);
+    this.pointersDown.clear();
+    for (const control of [...this.timedHolds.keys()]) {
+      this.cancelTimedHold(control);
     }
-    this.pulseTimers.clear();
     this.recompute();
   }
 
-  /** Wire one pad button: hold with a pointer, pulse with the keyboard. */
+  /**
+   * Wire one pad button: hold with a pointer, pulse with the keyboard. A pointer's hold ends on its
+   * first release event; browsers send `pointerleave` right after `pointerup` on touch, and that
+   * second release must not end a tap's timed hold.
+   */
   attachPad(control, button) {
     const press = (event) => {
       event.preventDefault();
-      this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
-      this.recompute();
-      if (control !== 'fire') {
-        this.pulse(control, TAP_MOVE_MS);
+      const pointers = this.pointersDown.get(control) ?? new Set();
+      pointers.add(event.pointerId);
+      this.pointersDown.set(control, pointers);
+      if (OPPOSITE_PADS.has(control)) {
+        this.cancelTimedHold(OPPOSITE_PADS.get(control));
+        this.tap(control);
       }
+      this.recompute();
     };
-    const release = () => {
-      const holds = this.padsDown.get(control) ?? 0;
-      if (holds > 0) {
-        this.padsDown.set(control, holds - 1);
+    const release = (event) => {
+      if (this.pointersDown.get(control)?.delete(event.pointerId)) {
         this.recompute();
       }
     };
@@ -100,17 +112,39 @@ export class InputController {
     });
   }
 
-  /** Hold `control` for `durationMs`. */
-  pulse(control, durationMs = PAD_PULSE_MS) {
-    this.padsDown.set(control, (this.padsDown.get(control) ?? 0) + 1);
+  /** A tap on a move pad: hold one more lane's worth, so two quick taps move about two lanes. */
+  tap(control) {
+    const now = Date.now();
+    const pendingEnd = this.timedHolds.get(control)?.endsAt ?? now;
+    this.holdUntil(control, Math.max(pendingEnd, now) + TAP_MOVE_MS);
+  }
+
+  /** Hold `control` for a keyboard activation; repeats do not add up, so auto-repeat stops on release. */
+  pulse(control) {
+    const pendingEnd = this.timedHolds.get(control)?.endsAt ?? 0;
+    this.holdUntil(control, Math.max(pendingEnd, Date.now() + PAD_PULSE_MS));
     this.recompute();
+  }
+
+  /** Hold `control` until the `endsAt` timestamp, replacing any timed hold it has. */
+  holdUntil(control, endsAt) {
+    this.cancelTimedHold(control);
     const timer = setTimeout(() => {
-      this.pulseTimers.delete(timer);
-      const holds = this.padsDown.get(control) ?? 0;
-      this.padsDown.set(control, Math.max(0, holds - 1));
+      this.timedHolds.delete(control);
       this.recompute();
-    }, durationMs);
-    this.pulseTimers.add(timer);
+    }, endsAt - Date.now());
+    this.timedHolds.set(control, { timer, endsAt });
+  }
+
+  /** End `control`'s timed hold early, if it has one. The caller recomputes. */
+  cancelTimedHold(control) {
+    const hold = this.timedHolds.get(control);
+    if (hold === undefined) {
+      return;
+    }
+
+    clearTimeout(hold.timer);
+    this.timedHolds.delete(control);
   }
 
   /** Handle a key press. */
@@ -148,7 +182,8 @@ export class InputController {
   /** Rebuild the shared state from what is held. */
   recompute() {
     const held = (control) =>
-      (this.padsDown.get(control) ?? 0) > 0 ||
+      (this.pointersDown.get(control)?.size ?? 0) > 0 ||
+      this.timedHolds.has(control) ||
       [...this.keysDown].some((code) => KEY_CONTROLS.get(code) === control);
 
     this.state.left = held('left');
