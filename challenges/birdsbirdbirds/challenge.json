@@ -42,7 +42,9 @@
       "done_when": "Pi called publish_gallery_item with the bird and got an answer, whatever its outcome."
     }
   ],
+  "skip_dialog": ["gallery"],
   "gallery": {
-    "kinds": ["bird"]
+    "kinds": ["bird"],
+    "notice_title": "Your bird joined the flock"
   }
 }
