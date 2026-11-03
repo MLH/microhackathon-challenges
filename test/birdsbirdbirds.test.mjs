@@ -26,6 +26,7 @@ import { FLIGHTS_DIRECTORY, readFlightHistory } from '../challenges/birdsbirdbir
 import { changedWaypoints, flightOf } from '../challenges/birdsbirdbirds/flight-path.mjs'
 import { galleryUrlFromEnvironment } from '../challenges/birdsbirdbirds/flock.mjs'
 import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
+import { cropOf } from '../challenges/birdsbirdbirds/page/trim.mjs'
 import { changedSegments, flightKeyframes, flockStartSeconds, playbackMilliseconds } from '../challenges/birdsbirdbirds/page/flight-motion.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
 
@@ -689,6 +690,38 @@ test('the sky highlights every segment touching a changed waypoint', () => {
   const segments = changedSegments(waypoints, [2, 5])
 
   assert.deepEqual(segments, [{ from: 0, to: 1 }, { from: 1, to: 2 }, { from: 3, to: 4 }])
+})
+
+/** RGBA pixels for a `width` × `height` image, transparent except opaque pixels at each `[x, y]` in `inked`. */
+const pixelsWithInk = (width, height, inked) => {
+  const rgba = new Uint8ClampedArray(width * height * 4)
+  for (const [x, y] of inked) rgba[(y * width + x) * 4 + 3] = 255
+
+  return rgba
+}
+
+test('a drawing crops to its ink plus 6% of the ink\'s longer side on every edge', () => {
+  const rgba = pixelsWithInk(512, 512, [[200, 100], [299, 149]])
+
+  const crop = cropOf(rgba, 512, 512)
+
+  assert.deepEqual(crop, { x: 194, y: 94, width: 112, height: 62 })
+})
+
+test('a drawing crop stays inside the canvas when the ink touches its edge', () => {
+  const rgba = pixelsWithInk(100, 100, [[0, 0], [49, 99]])
+
+  const crop = cropOf(rgba, 100, 100)
+
+  assert.deepEqual(crop, { x: 0, y: 0, width: 56, height: 100 })
+})
+
+test('a drawing crop ignores faint anti-aliasing noise and is undefined with no ink', () => {
+  const rgba = new Uint8ClampedArray(4 * 4 * 4).fill(8)
+
+  const crop = cropOf(rgba, 4, 4)
+
+  assert.equal(crop, undefined)
 })
 
 test('the sky plays a stated duration three times slower, as the gallery does', () => {

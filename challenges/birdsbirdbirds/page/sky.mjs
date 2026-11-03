@@ -6,6 +6,7 @@
 // input: the participant directs the flight by talking to Pi.
 
 import { createBirdLabel } from './bird-label.mjs'
+import { trimmedImageUrl } from './trimmed-image.mjs'
 import { changedSegments, distanceShares, flightKeyframes, flockKeyframes, flockStartSeconds, pathData, pathPoints, playbackMilliseconds } from './flight-motion.mjs'
 
 const STAGE_WIDTH = 1000
@@ -55,9 +56,10 @@ export function fitStage() {
   elements.stage.style.transform = `scale(${scale})`
 }
 
-/** Shows the participant's drawing from `imageUrl` wherever the bird appears. */
-export function setBirdImage(imageUrl) {
-  for (const image of [elements.bird, elements.perchBird, elements.chipBird]) image.src = imageUrl
+/** Shows the participant's drawing from `imageUrl`, cropped to its ink, wherever the bird appears. */
+export async function setBirdImage(imageUrl) {
+  const shownUrl = await trimmedImageUrl(imageUrl)
+  for (const image of [elements.bird, elements.perchBird, elements.chipBird]) image.src = shownUrl
 }
 
 /**
@@ -95,7 +97,9 @@ export function showFlock(feed) {
     const image = document.createElement('img')
     image.className = 'bird'
     image.alt = ''
-    image.src = item.image_url
+    trimmedImageUrl(item.image_url).then((shownUrl) => {
+      image.src = shownUrl
+    })
     box.appendChild(image)
     box.animate(flockKeyframes(item), {
       duration: playbackMilliseconds(item.duration_s),

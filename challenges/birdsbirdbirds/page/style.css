@@ -406,11 +406,22 @@ button:disabled {
   }
 }
 
+/* Dimmed, but line drawings must stay legible. */
 .flock {
   position: absolute;
   inset: 0;
-  opacity: 0.3;
-  filter: saturate(0.5);
+  opacity: 0.55;
+  filter: saturate(0.7);
+}
+
+/* The participant's bird: 1.6 times a flock bird, centred on the same box so
+   it stays on its path, with a white halo so dark line art reads against the
+   sky, the path, and the markers drawn below it. */
+.my-bird {
+  width: 192px;
+  height: 192px;
+  margin: -36px;
+  filter: drop-shadow(0 0 2px #fff) drop-shadow(0 0 6px rgb(255 255 255 / 85%));
 }
 
 .paths {

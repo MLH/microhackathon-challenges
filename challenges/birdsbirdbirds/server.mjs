@@ -44,6 +44,8 @@ const STATIC_FILES = {
   '/bird-label.mjs': { file: 'bird-label.mjs', contentType: 'text/javascript; charset=utf-8' },
   '/flight-motion.mjs': { file: 'flight-motion.mjs', contentType: 'text/javascript; charset=utf-8' },
   '/sky.mjs': { file: 'sky.mjs', contentType: 'text/javascript; charset=utf-8' },
+  '/trim.mjs': { file: 'trim.mjs', contentType: 'text/javascript; charset=utf-8' },
+  '/trimmed-image.mjs': { file: 'trimmed-image.mjs', contentType: 'text/javascript; charset=utf-8' },
   '/style.css': { file: 'style.css', contentType: 'text/css; charset=utf-8' },
 }
 

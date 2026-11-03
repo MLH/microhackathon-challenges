@@ -62,6 +62,13 @@ waypoints pop in, then the bird flies it. After a revision the previous path
 stays as a faint ghost, with the changed waypoints and the segments touching
 them highlighted. A chip names the bird and its origin.
 
+Drawings are often thin strokes in a corner of the canvas, so the page crops
+`bird.png` to its ink plus 6% padding before saving, and the sky crops every
+PNG it shows the same way, cached per URL, so birds published before that
+still fill their box. The participant's bird flies 1.6 times the size of a
+flock bird, centred on the same box so it stays on its path, with a white
+halo and above the path and markers; the flock is dimmed to 55% opacity.
+
 ## Flight history
 
 While the page server runs, each `bird.json` that passes the checker and

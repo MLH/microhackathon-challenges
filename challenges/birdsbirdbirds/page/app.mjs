@@ -5,6 +5,7 @@
 // /flight.json, which holds numbers only, never bird.json's CSS.
 
 import { fitStage, setBirdImage, showFlights, showFlock } from './sky.mjs'
+import { cropOf } from './trim.mjs'
 
 const COLOURS = [
   { name: 'Black', value: '#1f1f1f' },
@@ -220,10 +221,20 @@ function isCanvasBlank() {
   return true
 }
 
-/** Encodes the canvas as a PNG blob. */
+/**
+ * Encodes the drawing as a PNG blob, cropped to its ink plus a little
+ * padding, so a small drawing still fills its box in the sky. Call it only
+ * on a canvas with ink.
+ */
 function canvasToPng() {
+  const crop = cropOf(context.getImageData(0, 0, canvas.width, canvas.height).data, canvas.width, canvas.height)
+  const cropped = document.createElement('canvas')
+  cropped.width = crop.width
+  cropped.height = crop.height
+  cropped.getContext('2d').drawImage(canvas, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height)
+
   return new Promise((resolve, reject) => {
-    canvas.toBlob((blob) => (blob === null ? reject(new Error('the browser could not encode the drawing')) : resolve(blob)), 'image/png')
+    cropped.toBlob((blob) => (blob === null ? reject(new Error('the browser could not encode the drawing')) : resolve(blob)), 'image/png')
   })
 }
 
