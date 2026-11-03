@@ -12,4 +12,4 @@ Any bird works: realistic, abstract, silly, or a scribble with wings.
 Keep the name and origin family-friendly, because birds can appear on
 the booth screens.
 
-At the end, Pi asks if you want your bird shown there.
+At the end, the station asks if you want your bird shown there.
