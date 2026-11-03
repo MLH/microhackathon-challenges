@@ -1,9 +1,11 @@
 # BirdsBirdBirds
 
-Draw a bird in the browser, tell Pi how it should fly, and watch it cross the
-sky. Pi writes the flight as a CSS keyframe animation in `bird.json`, and a
-checker lets only safe animations through to the page. The bird can then be
-published to the booth screens as a `birds-v1` gallery item.
+Draw a bird in the browser, describe how it should fly, and direct the
+flight by talking to Pi. Pi writes the flight as a CSS keyframe animation in
+`bird.json`, and a checker lets only safe animations through. The sky page
+draws each flight as a numbered path, then flies the bird along it, so the
+participant can point at waypoints ("add a loop at 3"). When they're happy,
+Pi publishes the bird to the booth screens as a `birds-v1` gallery item.
 
 ## Files
 
@@ -36,7 +38,10 @@ It starts a turn when Pi is idle and follows the current turn otherwise. The
 skill then reads the drawing and reports `draw-bird`, so nobody has to tell
 Pi they saved. A `bird.png` already in the workspace when Pi starts, and a
 save with the same content, send nothing. Pi writes `bird.json` and runs the
-checker itself, so `animate` needs no message.
+checker itself, so `animate` needs no message. Pi counts the files in
+`.flights/` (see Flight history) to report `direct-flight`, and reports
+`join-flock` once `publish_gallery_item` answers, without asking first: the
+station's own notice lets the participant take the bird down.
 
 The server listens on port 4322. Set `BIRDSBIRDBIRDS_PORT` to use another
 port, though the skill and the challenge expect 4322.
@@ -144,7 +149,7 @@ When done:
 ```
 
 `cleanup` stops the server and removes `.birdsbirdbirds/`; it leaves
-`bird.png` and `bird.json` alone. Without boothstrap there is no
+`bird.png`, `bird.json`, and `.flights/` alone. Without boothstrap there is no
 `report_step` or `publish_gallery_item`, so the skill names each finished
 step and skips the gallery.
 
@@ -175,15 +180,14 @@ need them.
 The `fly_` prefix keeps a bird's keyframes from colliding with CSS keywords
 or with the sky page's own `flap` keyframes.
 
-The keyframes alone place the bird. In the sky page the bird's wrapper sits
-at `top: 0; left: 0`, so `translate(x, y)` is measured from the top-left
-corner of the sky with no extra offset. A gallery renderer should place the
+The keyframes alone place the bird. In the sky page the bird's box sits at
+the top-left corner of the 1000 by 850 stage, so `translate(x, y)` is
+measured from there with no extra offset. A gallery renderer should place the
 bird the same way.
 
-Payloads come from `check-bird.mjs`, but a display should still load
-`css_keyframes` only as CSS text, as the sky page does with a constructed
-`CSSStyleSheet` (`replaceSync`), and set names with `textContent`, never as
-HTML.
+Payloads come from `check-bird.mjs`, but a display should still never insert
+`css_keyframes` as HTML, and should set names with `textContent`. The sky
+page takes neither: it gets waypoint numbers from `/flight.json`.
 
 ## What the checker allows
 

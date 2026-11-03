@@ -1,7 +1,7 @@
 {
   "id": "birdsbirdbirds",
   "title": "BirdsBirdBirds",
-  "tagline": "Draw a bird and watch it fly across the sky.",
+  "tagline": "Draw a bird, then direct its flight by talking to Pi.",
   "icon": "icon.txt",
   "type": "terminal",
   "agent": "pi",
@@ -11,6 +11,7 @@
   "estimated_minutes": 10,
   "learning_objectives": [
     "describing a task so an agent can do it",
+    "refining an agent's work one prompt at a time",
     "checking an agent's work with a script"
   ],
   "featured_tech": ["Gemini", "Pi", "CSS animation"],
@@ -24,15 +25,21 @@
     },
     {
       "id": "animate",
-      "title": "Give it a flight",
-      "hint": "Tell Pi how your bird should fly.",
-      "done_when": "bird.json exists in the workspace and passes check-bird.mjs."
+      "title": "Teach it to fly",
+      "hint": "Tell Pi how your bird should fly, like you'd tell a friend.",
+      "done_when": "Pi wrote bird.json from the participant's description and it passes check-bird.mjs."
     },
     {
-      "id": "fly",
-      "title": "Watch it fly",
-      "hint": "Watch your bird cross the sky and tell Pi how it looks.",
-      "done_when": "The participant watched the bird fly and said so."
+      "id": "direct-flight",
+      "title": "Direct the flight",
+      "hint": "Tell Pi what to change. Name a waypoint number to change just that part.",
+      "done_when": "Two or more distinct flights have passed check-bird.mjs (.flights holds 2 or more files), or the participant says they're happy with the flight."
+    },
+    {
+      "id": "join-flock",
+      "title": "Join the flock",
+      "hint": "Say you're happy with the flight, and Pi sends your bird to the booth screens.",
+      "done_when": "Pi called publish_gallery_item with the bird and got an answer, whatever its outcome."
     }
   ],
   "gallery": {
