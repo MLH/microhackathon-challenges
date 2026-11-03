@@ -1,0 +1,303 @@
+:root {
+  color-scheme: dark;
+  --bg: #0d1117;
+  --panel: #161b22;
+  --line: #30363d;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --success: #3fb950;
+  --warn: #d29922;
+  --error: #f85149;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 17px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.masthead {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.masthead h1 {
+  margin: 0;
+  font-size: 1.3rem;
+}
+
+.masthead-sub {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.mode-label {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--warn);
+  border-radius: 0.3rem;
+  color: var(--warn);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.desk {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(16rem, 2fr);
+}
+
+.chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  margin: 0;
+  padding: 1rem 1.25rem;
+  list-style: none;
+}
+
+.message {
+  max-width: 90%;
+  margin-bottom: 0.75rem;
+  padding: 0.6rem 0.8rem;
+  border-radius: 0.6rem;
+  background: var(--panel);
+}
+
+.message-participant {
+  margin-left: auto;
+  background: #1f3a5f;
+}
+
+.message-error {
+  border: 1px solid var(--error);
+  color: var(--error);
+}
+
+.message-text {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.rung-tag {
+  display: inline-block;
+  margin-bottom: 0.3rem;
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.tool-calls {
+  margin: 0.4rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-call {
+  color: var(--muted);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 0.75rem;
+}
+
+.tool-call::before {
+  content: "⚙ ";
+}
+
+.booking-line {
+  margin: 0.4rem 0 0;
+  color: var(--success);
+  font-weight: 600;
+}
+
+.divider {
+  margin: 1rem 0;
+  color: var(--accent);
+  font-size: 0.8rem;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.thinking {
+  margin: 0;
+  padding: 0 1.25rem 0.5rem;
+  color: var(--muted);
+}
+
+.composer {
+  padding: 0.75rem 1.25rem 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.suggestion {
+  display: block;
+  width: 100%;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border: 1px dashed var(--accent);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composer-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+textarea {
+  flex: 1;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: var(--panel);
+  color: var(--text);
+  font: inherit;
+  resize: none;
+}
+
+#send {
+  padding: 0 1.1rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--accent);
+  color: #0d1117;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#send:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.config {
+  overflow-y: auto;
+  padding: 1rem 1.25rem;
+}
+
+.config h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.config-source {
+  margin: 0.2rem 0 1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.ladder {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.3rem;
+  margin: 0 0 1rem;
+  padding: 0;
+  list-style: none;
+}
+
+.rung {
+  padding: 0.35rem 0.2rem;
+  border: 1px solid var(--line);
+  border-radius: 0.4rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.rung-tried::after {
+  content: " ✓";
+  color: var(--success);
+}
+
+.rung-live {
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.config-card {
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.6rem;
+  background: var(--panel);
+}
+
+.config-card dt {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.config-card dd {
+  margin: 0.1rem 0 0.7rem;
+  overflow-wrap: anywhere;
+}
+
+.config-prompt {
+  font-size: 0.85rem;
+}
+
+.config-changed {
+  animation: config-flash 1.5s ease-out;
+}
+
+@keyframes config-flash {
+  from {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgb(88 166 255 / 45%);
+  }
+}
+
+.booking {
+  margin-top: 1rem;
+  padding: 0.75rem;
+  border: 1px solid var(--success);
+  border-radius: 0.6rem;
+}
+
+.booking h3 {
+  margin: 0 0 0.3rem;
+  color: var(--success);
+  font-size: 0.95rem;
+}
+
+.booking p {
+  margin: 0;
+}

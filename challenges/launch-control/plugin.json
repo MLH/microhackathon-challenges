@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "launch-control",
+  "version": "1.0.0",
+  "description": "Launch Control: Travel Desk. Climb a travel-booking agent up four LaunchDarkly AgentControl variations, live, with no redeploy."
+}

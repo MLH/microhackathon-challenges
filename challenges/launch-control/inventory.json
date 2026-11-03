@@ -1,0 +1,33 @@
+{
+  "$comment": "The travel desk's made-up inventory: no real airline, hotel, or price. Dates are month-day only, so a search matches them in any year. One trip fits the suggested request (JFK to Lisbon, March 12 to 16, waterfront, under $900): NV310, NV311, and Alfama Riverside Guesthouse, $818 for four nights.",
+  "airports": {
+    "JFK": "New York",
+    "LIS": "Lisbon",
+    "OPO": "Porto",
+    "MAD": "Madrid"
+  },
+  "flights": [
+    { "id": "NV308", "airline": "Novair", "origin": "JFK", "destination": "LIS", "date": "03-11", "departs": "07:10", "arrives": "18:55", "stops": 0, "price_usd": 179 },
+    { "id": "AT112", "airline": "Atlantica", "origin": "JFK", "destination": "LIS", "date": "03-12", "departs": "08:05", "arrives": "19:50", "stops": 0, "price_usd": 305 },
+    { "id": "SK240", "airline": "Skyline", "origin": "JFK", "destination": "LIS", "date": "03-12", "departs": "06:40", "arrives": "22:15", "stops": 1, "price_usd": 268 },
+    { "id": "NV310", "airline": "Novair", "origin": "JFK", "destination": "LIS", "date": "03-12", "departs": "07:10", "arrives": "18:55", "stops": 0, "price_usd": 214 },
+    { "id": "AT114", "airline": "Atlantica", "origin": "JFK", "destination": "LIS", "date": "03-13", "departs": "08:05", "arrives": "19:50", "stops": 0, "price_usd": 288 },
+    { "id": "AT113", "airline": "Atlantica", "origin": "LIS", "destination": "JFK", "date": "03-16", "departs": "11:30", "arrives": "14:20", "stops": 0, "price_usd": 322 },
+    { "id": "SK241", "airline": "Skyline", "origin": "LIS", "destination": "JFK", "date": "03-16", "departs": "09:15", "arrives": "17:40", "stops": 1, "price_usd": 281 },
+    { "id": "NV311", "airline": "Novair", "origin": "LIS", "destination": "JFK", "date": "03-16", "departs": "13:05", "arrives": "15:50", "stops": 0, "price_usd": 236 },
+    { "id": "NV313", "airline": "Novair", "origin": "LIS", "destination": "JFK", "date": "03-17", "departs": "13:05", "arrives": "15:50", "stops": 0, "price_usd": 165 },
+    { "id": "AT220", "airline": "Atlantica", "origin": "JFK", "destination": "OPO", "date": "03-12", "departs": "09:00", "arrives": "20:30", "stops": 0, "price_usd": 331 },
+    { "id": "AT221", "airline": "Atlantica", "origin": "OPO", "destination": "JFK", "date": "03-16", "departs": "12:00", "arrives": "15:10", "stops": 0, "price_usd": 344 },
+    { "id": "SK330", "airline": "Skyline", "origin": "JFK", "destination": "MAD", "date": "03-12", "departs": "18:20", "arrives": "23:55", "stops": 1, "price_usd": 296 },
+    { "id": "SK331", "airline": "Skyline", "origin": "MAD", "destination": "JFK", "date": "03-16", "departs": "10:45", "arrives": "16:30", "stops": 1, "price_usd": 301 }
+  ],
+  "hotels": [
+    { "id": "LIS-ALFAMA", "name": "Alfama Riverside Guesthouse", "city": "Lisbon", "neighborhood": "Alfama", "waterfront": true, "nightly_usd": 92 },
+    { "id": "LIS-CAIS", "name": "Cais do Sodré Harbor Hotel", "city": "Lisbon", "neighborhood": "Cais do Sodré", "waterfront": true, "nightly_usd": 139 },
+    { "id": "LIS-BELEM", "name": "Belém Marina Suites", "city": "Lisbon", "neighborhood": "Belém", "waterfront": true, "nightly_usd": 210 },
+    { "id": "LIS-BAIRRO", "name": "Bairro Alto Budget Rooms", "city": "Lisbon", "neighborhood": "Bairro Alto", "waterfront": false, "nightly_usd": 58 },
+    { "id": "LIS-AVENIDA", "name": "Avenida Business Inn", "city": "Lisbon", "neighborhood": "Avenidas Novas", "waterfront": false, "nightly_usd": 110 },
+    { "id": "OPO-RIBEIRA", "name": "Ribeira Quay Hotel", "city": "Porto", "neighborhood": "Ribeira", "waterfront": true, "nightly_usd": 118 },
+    { "id": "MAD-SOL", "name": "Puerta del Sol Rooms", "city": "Madrid", "neighborhood": "Sol", "waterfront": false, "nightly_usd": 97 }
+  ]
+}

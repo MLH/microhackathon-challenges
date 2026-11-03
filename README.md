@@ -14,6 +14,7 @@ links to the package's own README.
 | [vibe-coding-mad-libs](challenges/vibe-coding-mad-libs/README.md) | Fill four blanks, and Pi builds the web app you described. |
 | [birdsbirdbirds](challenges/birdsbirdbirds/README.md) | Draw a bird and watch it fly across the sky. |
 | [glitch-invaders](challenges/glitch-invaders/README.md) | Shoot the bugs, then debug the three that fight back using Sentry evidence. |
+| [launch-control](challenges/launch-control/README.md) | Upgrade a live AI agent's prompt, tools, and model with no redeploy. |
 
 Challenges follow the contract in boothstrap.sh's challenge spec and
 authoring guide; agents working here start from [AGENTS.md](AGENTS.md).
