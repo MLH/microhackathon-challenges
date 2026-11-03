@@ -41,6 +41,12 @@ The participant may still say they saved, and a standalone run may have no
 watcher; then check the file yourself as step 1 says. Never report a step
 only because someone asks: its condition must hold.
 
+## Waypoint numbers
+
+Write waypoint numbers as plain digits, such as "waypoint 3" or "3–5". Never
+use circled or other enclosed digit characters: the station's terminal font
+can't show them.
+
 ## 1. Draw
 
 Open the drawing page right away, as your first action once the challenge
@@ -110,7 +116,7 @@ the current directory with exactly these keys and no others:
 That example is only the shape. Invent a flight that acts out what they
 said:
 
-- Every keyframe is a waypoint, and the sky numbers them ①, ②, ③ in order.
+- Every keyframe is a waypoint, and the sky numbers them 1, 2, 3 in order.
   Use at least 5. Give every keyframe a `transform` that starts with
   `translate(...)`, start at `0%`, end at `100%`, and never use one
   percentage twice, so your numbers match the page's.
@@ -137,11 +143,11 @@ checker or edit it. When it passes, report `animate`.
 
 Tell them to watch the sky: the path draws itself on, the numbers pop in,
 then the bird flies it. Narrate the flight by waypoint number in one line,
-such as "Drew 6 waypoints: hurried climb ①–②, double-back at ③ (forgot the
-keys!), sprint ④–⑥." Then invite changes, "Tell me what to change. Point at
-a number if it helps.", and suggest 2 or 3 short next prompts that fit this
-flight, such as "add a loop at ③", "slower at the end", or "make it
-bouncier".
+such as "Drew 6 waypoints: hurried climb 1–2, double-back at waypoint 3
+(forgot the keys!), sprint 4–6." Then invite changes, "Tell me what to
+change. Point at a number if it helps.", and suggest 2 or 3 short next
+prompts that fit this flight, such as "add a loop at 3", "slower at the
+end", or "make it bouncier".
 
 ## 4. Direct the flight
 
@@ -150,17 +156,17 @@ Each request from the participant is a revision. For each one:
 1. Work out which waypoints it touches, edit `bird.json`, and rerun the
    checker until it prints `ok`.
 2. Summarise the change in one line, naming waypoints by number, such as
-   "Loop at ④, ⑤–⑥ slowed from 2s to 5s." The sky ghosts the old path and
-   highlights what changed, so point them at it.
+   "Loop at waypoint 4, 5–6 slowed from 2s to 5s." The sky ghosts the old
+   path and highlights what changed, so point them at it.
 3. Suggest 2 or 3 short next prompts, and mention they can say they're happy
    to send it to the flock.
 
 When a request won't fit, say why in a sentence and offer the closest thing
 that does, then wait for their answer. For example, a loop that would leave
-the sky ("A loop at ⑤ would clip the top of the sky. Put it at ④ instead,
-where there's room?"), a hop under half a second or a whole flight under 6s
-("That's too quick to see. Try 0.8s for that dash?"), or more waypoints than
-fit in 4096 bytes of keyframes.
+the sky ("A loop at waypoint 5 would clip the top of the sky. Put it at 4
+instead, where there's room?"), a hop under half a second or a whole flight
+under 6s ("That's too quick to see. Try 0.8s for that dash?"), or more
+waypoints than fit in 4096 bytes of keyframes.
 
 Each flight that passes the checker is recorded in `.flights/` in the
 current directory. Report `direct-flight` as soon as `ls .flights` lists 2
