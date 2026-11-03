@@ -36,6 +36,14 @@ const CAPTURE_TIMEOUT_MS = 30_000
 const STOP_GRACE_MS = 2_000
 
 /**
+ * Chrome's helper processes can still write to the profile for a moment
+ * after Chrome exits, so the profile counts as removed only once it has
+ * stayed gone this long, within the overall limit after it.
+ */
+const PROFILE_QUIET_MS = 300
+const PROFILE_REMOVAL_LIMIT_MS = 5_000
+
+/**
  * Signals a person or a parent can send to end the helper early. Pi's bash
  * tool instead SIGKILLs the command's whole process group on abort or
  * timeout; that can't be caught, but Chrome shares the group, so it reaches
@@ -238,6 +246,21 @@ async function stopChrome(child) {
 }
 
 /**
+ * Removes `profile`, again whenever a late Chrome helper process recreates
+ * part of it, until it has stayed gone for the quiet period. Gives up after
+ * the removal limit, leaving the rest for the session reset, which wipes
+ * TMPDIR.
+ */
+async function removeProfile(profile) {
+  const giveUpAt = Date.now() + PROFILE_REMOVAL_LIMIT_MS
+  while (Date.now() < giveUpAt) {
+    rmSync(profile, { recursive: true, force: true, maxRetries: 3 })
+    await delay(PROFILE_QUIET_MS)
+    if (!existsSync(profile)) return
+  }
+}
+
+/**
  * Until the returned function is called, makes an interrupt kill Chrome,
  * remove `profile`, and exit 1, since a signal skips `finally` blocks.
  */
@@ -307,7 +330,7 @@ export async function saveScreenshot({ url, outputPath, environment = process.en
     timeout.clear()
     devTools?.close()
     if (chrome) await stopChrome(chrome.child)
-    if (profile) rmSync(profile, { recursive: true, force: true, maxRetries: 3 })
+    if (profile) await removeProfile(profile)
     stopCleaningUpOnInterrupt()
   }
 }
