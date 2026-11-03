@@ -8,8 +8,9 @@
 // The feed is `<gallery url>/birds.json`:
 // `{ "items": [{ id, bird_name, origin, display_name, stored_at, image_url,
 // keyframes: [{ offset, transform, opacity?, easing? }], duration_s,
-// timing_function }] }`, with `image_url` a path on the gallery's origin and
-// every transform in stage pixels. Each transform and timing function is
+// timing_function }] }`, with `image_url` a path on the gallery's origin,
+// every transform in stage pixels, and `duration_s` the bird's own stated
+// duration, which the page slows down as the gallery does. Each transform and timing function is
 // read with check-bird.mjs's grammar and written out again, so nothing else
 // reaches the page.
 
@@ -34,8 +35,8 @@ const MAX_KEYFRAMES = 40
 const MAX_TRANSFORM_LENGTH = 400
 const MAX_ID_LENGTH = 100
 const MAX_LABEL_LENGTH = { bird_name: 40, origin: 60, display_name: 40 }
-const MIN_DURATION_SECONDS = 1
-const MAX_DURATION_SECONDS = 600
+const MIN_DURATION_SECONDS = 2
+const MAX_DURATION_SECONDS = 60
 
 const DEMO_DIRECTORY = path.join(path.dirname(fileURLToPath(import.meta.url)), 'flock')
 const DEMO_FEED_FILE = path.join(DEMO_DIRECTORY, 'flock.json')

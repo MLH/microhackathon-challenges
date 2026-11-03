@@ -6,7 +6,7 @@
 // input: the participant directs the flight by talking to Pi.
 
 import { createBirdLabel } from './bird-label.mjs'
-import { changedSegments, distanceShares, flightKeyframes, flockKeyframes, flockStartSeconds, pathData, pathPoints } from './flight-motion.mjs'
+import { changedSegments, distanceShares, flightKeyframes, flockKeyframes, flockStartSeconds, pathData, pathPoints, playbackMilliseconds } from './flight-motion.mjs'
 
 const STAGE_WIDTH = 1000
 const STAGE_HEIGHT = 850
@@ -98,7 +98,7 @@ export function showFlock(feed) {
     image.src = item.image_url
     box.appendChild(image)
     box.animate(flockKeyframes(item), {
-      duration: item.duration_s * 1000,
+      duration: playbackMilliseconds(item.duration_s),
       iterations: Infinity,
       delay: -flockStartSeconds(position, item.duration_s) * 1000,
     })
@@ -221,7 +221,7 @@ function waypointMarker(number, point) {
 
 /** Starts the bird's endless flight, lighting each waypoint marker as the bird passes it. */
 function takeOff(current, markers) {
-  const timing = { duration: current.duration_s * 1000, iterations: Infinity }
+  const timing = { duration: playbackMilliseconds(current.duration_s), iterations: Infinity }
   elements.flight.hidden = false
   elements.flight.animate(flightKeyframes(current), timing)
   current.waypoints.forEach((waypoint, index) => {

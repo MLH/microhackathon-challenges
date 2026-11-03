@@ -29,7 +29,7 @@
           "transform": "translate(1040px, 125px) rotate(0deg)"
         }
       ],
-      "duration_s": 42,
+      "duration_s": 14,
       "timing_function": "ease-in-out"
     },
     {
@@ -61,7 +61,7 @@
           "transform": "translate(1040px, 55px) rotate(0deg)"
         }
       ],
-      "duration_s": 54,
+      "duration_s": 18,
       "timing_function": "linear"
     },
     {
@@ -93,7 +93,7 @@
           "transform": "translate(1040px, 300px) rotate(0deg)"
         }
       ],
-      "duration_s": 36,
+      "duration_s": 12,
       "timing_function": "ease-in-out"
     },
     {
@@ -125,7 +125,7 @@
           "transform": "translate(1040px, 560px) rotate(0deg)"
         }
       ],
-      "duration_s": 48,
+      "duration_s": 16,
       "timing_function": "linear"
     },
     {
@@ -157,7 +157,7 @@
           "transform": "translate(1040px, 430px) rotate(0deg)"
         }
       ],
-      "duration_s": 45,
+      "duration_s": 15,
       "timing_function": "ease-in-out"
     },
     {
@@ -189,7 +189,7 @@
           "transform": "translate(1040px, 215px) rotate(0deg)"
         }
       ],
-      "duration_s": 60,
+      "duration_s": 20,
       "timing_function": "linear"
     },
     {
@@ -221,7 +221,7 @@
           "transform": "translate(1040px, 470px) rotate(0deg)"
         }
       ],
-      "duration_s": 39,
+      "duration_s": 13,
       "timing_function": "ease-in-out"
     }
   ]

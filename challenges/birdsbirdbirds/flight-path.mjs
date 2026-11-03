@@ -10,9 +10,6 @@ import { readKeyframes } from './check-bird.mjs'
 export const STAGE_WIDTH = 1000
 export const STAGE_HEIGHT = 850
 
-/** How much slower than bird.json says a bird flies, as the gallery plays it. */
-export const FLIGHT_SLOWDOWN = 3
-
 /** The bird's box on the gallery stage, in pixels; a translate percentage is a share of it. */
 export const BIRD_BOX_PIXELS = 120
 
@@ -34,8 +31,8 @@ const IDENTITY = [1, 0, 0, 1, 0, 0]
 /**
  * The flight a checked bird.json `entry` describes, numbered `version`:
  * `{ version, bird_name, origin, duration_s, timing_function, waypoints }`.
- * `duration_s` is one flight's playback time on the stage, already slowed
- * down as the gallery slows it. Each waypoint is `{ n, offset, x, y }` plus
+ * `duration_s` is the flight's own duration in seconds, as bird.json states
+ * it; players slow it down as the gallery does. Each waypoint is `{ n, offset, x, y }` plus
  * `rotate` (degrees) and `scale` when its transform sets them, `opacity` when
  * its frame sets it, and `easing` when its frame sets a timing function.
  * `x` and `y` place the bird box's top-left corner, as translate does.
@@ -47,7 +44,7 @@ export function flightOf(entry, version) {
     version,
     bird_name: entry.bird_name,
     origin: entry.origin,
-    duration_s: Number.parseFloat(duration) * FLIGHT_SLOWDOWN,
+    duration_s: Number.parseFloat(duration),
     timing_function: timingFunction,
     waypoints: waypointsOf(readKeyframes(css, animationName)),
   }

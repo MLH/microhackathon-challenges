@@ -22,11 +22,11 @@ import { crc32, deflateSync } from 'node:zlib'
 import { DEFAULT_DEBOUNCE_MS, watchWorkspace } from '../challenges/birdsbirdbirds/bird-watcher.mjs'
 import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../challenges/birdsbirdbirds/check-bird.mjs'
 import birdsbirdbirdsExtension from '../challenges/birdsbirdbirds/extension.mjs'
-import { FLIGHTS_DIRECTORY } from '../challenges/birdsbirdbirds/flight-history.mjs'
+import { FLIGHTS_DIRECTORY, readFlightHistory } from '../challenges/birdsbirdbirds/flight-history.mjs'
 import { changedWaypoints, flightOf } from '../challenges/birdsbirdbirds/flight-path.mjs'
 import { galleryUrlFromEnvironment } from '../challenges/birdsbirdbirds/flock.mjs'
 import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
-import { changedSegments, flightKeyframes, flockStartSeconds } from '../challenges/birdsbirdbirds/page/flight-motion.mjs'
+import { changedSegments, flightKeyframes, flockStartSeconds, playbackMilliseconds } from '../challenges/birdsbirdbirds/page/flight-motion.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -691,8 +691,14 @@ test('the sky highlights every segment touching a changed waypoint', () => {
   assert.deepEqual(segments, [{ from: 0, to: 1 }, { from: 1, to: 2 }, { from: 3, to: 4 }])
 })
 
-test('the sky staggers flock birds 2.3 seconds apart within one flight, as the gallery does', () => {
-  const starts = [0, 1, 2, 30].map((position) => flockStartSeconds(position, 30))
+test('the sky plays a stated duration three times slower, as the gallery does', () => {
+  const milliseconds = playbackMilliseconds(12)
+
+  assert.equal(milliseconds, 36_000)
+})
+
+test('the sky staggers flock birds 2.3 seconds apart within one slowed flight, as the gallery does', () => {
+  const starts = [0, 1, 2, 30].map((position) => flockStartSeconds(position, 10))
 
   assert.deepEqual(starts.map((seconds) => Number(seconds.toFixed(2))), [0, 2.3, 4.6, 9])
 })
@@ -716,7 +722,7 @@ test('the server sends a passing bird.json as waypoints in stage pixels and reco
     version: 1,
     bird_name: 'Robin',
     origin: 'Durham, NC',
-    duration_s: 36,
+    duration_s: 12,
     timing_function: 'linear',
     waypoints: [
       { n: 1, offset: 0, x: 100, y: 170 },
@@ -882,7 +888,7 @@ const feedItem = (overrides = {}) => ({
     { offset: 0.5, transform: 'translate(400px, 200px)', opacity: 0.8, easing: 'ease-in' },
     { offset: 1, transform: 'translate(1040px, 300px)' },
   ],
-  duration_s: 42,
+  duration_s: 14,
   timing_function: 'ease-in-out',
   ...overrides,
 })
@@ -948,13 +954,14 @@ test('the server proxies the gallery feed and its PNGs same-origin, fetching eac
   assert.deepEqual(gallery.requests, ['/gallery/booth/birds.json', '/gallery/booth/items/item-1/files/bird.png'])
 }))
 
-test('the server drops feed birds whose transform fails the checker or whose image is on another origin', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+test('the server drops feed birds whose transform fails the checker, whose image is on another origin, or whose stated duration is out of range', (testContext) => withWorkspace(async ({ directory, workspace }) => {
   const gallery = await startGalleryStub(testContext, {
     '/gallery/booth/birds.json': {
       body: JSON.stringify({
         items: [
           feedItem({ id: 'url-transform', keyframes: [{ offset: 0, transform: 'url(https://evil.example/x.svg)' }] }),
           feedItem({ id: 'elsewhere', image_url: '//evil.example/bird.png' }),
+          feedItem({ id: 'already-slowed', duration_s: 126 }),
           feedItem({ id: 'kept' }),
         ],
       }),
@@ -965,6 +972,19 @@ test('the server drops feed birds whose transform fails the checker or whose ima
   const flock = await getFlock(port)
 
   assert.deepEqual(flock.items.map((item) => item.id), ['kept'])
+}))
+
+test('the seed script leaves a workspace whose sky opens on a revision', () => withTemporaryDirectory(async (directory) => {
+  const workspace = path.join(directory, 'workspace')
+
+  const result = spawnSync(process.execPath, [path.join(testDirectory, '..', 'tools', 'seed-birds-workspace.mjs'), workspace], { encoding: 'utf8', timeout: 10_000 })
+
+  assert.equal(result.status, 0, result.stderr)
+  const { current, previous, changed } = readFlightHistory(workspace)
+  assert.equal(current.version, 2)
+  assert.equal(previous.version, 1)
+  assert.ok(changed.length > 0)
+  assert.ok(fs.existsSync(path.join(workspace, 'bird.png')))
 }))
 
 const UNAVAILABLE_GALLERIES = [

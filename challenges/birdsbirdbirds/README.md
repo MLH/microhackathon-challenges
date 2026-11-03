@@ -77,7 +77,7 @@ it never depends on what `fs.watch` reports.
 | --- | --- |
 | `version` | The flight's number in `.flights/` |
 | `bird_name`, `origin` | From `bird.json` |
-| `duration_s` | One flight's playback time: `animation.duration` slowed 3 times, as the gallery plays it |
+| `duration_s` | `animation.duration` in seconds, unslowed; the page plays it 3 times slower, as the gallery does |
 | `timing_function` | `animation.timing_function` |
 | `waypoints` | `{ n, offset, x, y }`, plus `rotate` (degrees), `scale`, `opacity`, and `easing` when set |
 
@@ -101,13 +101,14 @@ else from `BIRDSBIRDBIRDS_GALLERY_URL`, which an event can set in its
     "id": "…", "bird_name": "…", "origin": "…", "display_name": "…",
     "stored_at": "…", "image_url": "/gallery/{slug}/items/{id}/files/bird.png",
     "keyframes": [{ "offset": 0, "transform": "translate(120px, 300px) rotate(5deg)", "opacity": 1, "easing": "ease-in" }],
-    "duration_s": 42, "timing_function": "ease-in-out"
+    "duration_s": 14, "timing_function": "ease-in-out"
   }]
 }
 ```
 
 `image_url` is a path on the gallery's origin, transforms are in stage
-pixels, and `duration_s` is one flight's playback time on the stage. Each
+pixels, and `duration_s` is the bird's own stated duration (2 to 60 s,
+unslowed); the page slows it 3 times at playback, as the gallery does. Each
 transform and timing function must pass the checker's grammar and is written
 out again; a bird that fails any check, or whose image is on another origin,
 is dropped. The booth API serves its files same-origin only, so the page
@@ -120,6 +121,16 @@ With no URL, or when the gallery is offline, errs, answers 404, or sends no
 valid feed, `/flock.json` sends the practice flock in `flock/` instead, its
 SVGs served at `GET /flock/demo/<name>.svg`. Its `source` field is `live` or
 `demo`, and the page labels the flock to match.
+
+## Preview the page
+
+To see the sky open on a revision, with a ghost path and highlighted
+changes, seed a workspace with a sample drawing and two flights, then run the
+command the script prints, from the repository root:
+
+```sh
+node tools/seed-birds-workspace.mjs /tmp/bird-preview
+```
 
 ## Run without boothstrap
 

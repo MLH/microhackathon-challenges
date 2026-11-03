@@ -7,6 +7,9 @@
 /** The bird's box on the gallery stage, in pixels; the path runs through its centre. */
 export const BIRD_BOX_PIXELS = 120
 
+/** How much slower than its stated duration a bird flies, as the gallery plays it. */
+export const FLIGHT_SLOWDOWN = 3
+
 /** How many seconds apart flock birds start, as the gallery staggers them. */
 export const FLOCK_STAGGER_SECONDS = 2.3
 
@@ -69,12 +72,18 @@ export function flockKeyframes({ keyframes, timing_function: timingFunction }) {
   }, 'opacity', keyframe.opacity))
 }
 
+/** How long one flight of a bird whose stated duration is `durationSeconds` plays, in milliseconds, slowed as the gallery slows it. */
+export function playbackMilliseconds(durationSeconds) {
+  return durationSeconds * FLIGHT_SLOWDOWN * 1000
+}
+
 /**
- * How many seconds into its flight the flock bird at `position` starts, so
- * birds sharing the sky don't fly as one, as the gallery staggers them.
+ * How many seconds into its slowed flight the flock bird at `position`
+ * starts, given its stated `durationSeconds`, so birds sharing the sky don't
+ * fly as one, as the gallery staggers them.
  */
 export function flockStartSeconds(position, durationSeconds) {
-  return (position * FLOCK_STAGGER_SECONDS) % durationSeconds
+  return (position * FLOCK_STAGGER_SECONDS) % (durationSeconds * FLIGHT_SLOWDOWN)
 }
 
 /** `keyframe` with `key` set to `value`, unless `value` is undefined. */
