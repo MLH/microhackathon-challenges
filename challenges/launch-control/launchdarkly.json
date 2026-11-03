@@ -1,0 +1,6 @@
+{
+  "$comment": "Public settings for live LaunchDarkly mode; none is a secret. MLH fills these in from its LaunchDarkly project after running provision.mjs. While any value is still a <placeholder>, the challenge runs in demo mode against a local stand-in. LAUNCHDARKLY_PROJECT_KEY, LAUNCHDARKLY_ENVIRONMENT_KEY, and LAUNCHDARKLY_AI_CONFIG_KEY in the environment replace these. Live mode also needs LAUNCHDARKLY_SDK_API_KEY and LAUNCHDARKLY_API_AUTH_TOKEN, which the station's vault provides; never put a key here.",
+  "projectKey": "<project-key>",
+  "environmentKey": "<environment-key>",
+  "configKey": "<ai-config-key>"
+}

@@ -1,0 +1,82 @@
+{
+  "$comment": "The travel booker's four rungs: one LaunchDarkly AgentControl config, four variations. provision.mjs writes them to LaunchDarkly, and demo mode's local stand-in serves them, so both modes read this one file. Rungs climb in order; each one adds a single thing.",
+  "provider": "Gemini",
+  "tools": {
+    "search_flights": {
+      "description": "Search the travel desk's flight inventory for one-way flights between two airports on one date. Returns each flight's id, times, stops, and price in US dollars.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "origin": { "type": "string", "description": "IATA code of the departure airport, such as JFK." },
+          "destination": { "type": "string", "description": "IATA code of the arrival airport, such as LIS." },
+          "date": { "type": "string", "description": "Departure date, YYYY-MM-DD." }
+        },
+        "required": ["origin", "destination", "date"]
+      }
+    },
+    "search_hotels": {
+      "description": "Search the travel desk's hotel inventory in one city. Returns each hotel's id, neighborhood, whether it is on the waterfront, and its nightly price in US dollars.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": { "type": "string", "description": "City name, such as Lisbon." },
+          "check_in": { "type": "string", "description": "Check-in date, YYYY-MM-DD." },
+          "check_out": { "type": "string", "description": "Check-out date, YYYY-MM-DD." }
+        },
+        "required": ["city", "check_in", "check_out"]
+      }
+    },
+    "book_trip": {
+      "description": "Book a whole trip: an outbound flight, a return flight, and a hotel stay, using ids from search_flights and search_hotels. Returns a confirmation with the total price.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "outbound_flight_id": { "type": "string" },
+          "return_flight_id": { "type": "string" },
+          "hotel_id": { "type": "string" },
+          "check_in": { "type": "string", "description": "YYYY-MM-DD" },
+          "check_out": { "type": "string", "description": "YYYY-MM-DD" }
+        },
+        "required": ["outbound_flight_id", "return_flight_id", "hotel_id", "check_in", "check_out"]
+      }
+    }
+  },
+  "rungs": [
+    {
+      "rung": 1,
+      "key": "bare",
+      "name": "v1 · bare",
+      "adds": "A small model and a one-line prompt.",
+      "model": "gemini-2.5-flash-lite",
+      "instructions": "You are a travel booking assistant.",
+      "tools": []
+    },
+    {
+      "rung": 2,
+      "key": "prompted",
+      "name": "v2 · prompted",
+      "adds": "A real travel-agent prompt.",
+      "model": "gemini-2.5-flash-lite",
+      "instructions": "You are the booking agent at Launch Control Travel Desk.\n\nThe traveler flies from New York (JFK). Plan trips that match every part of their request: dates, places, budget, and preferences.\n\nRules:\n- Never invent flights, hotels, prices, or confirmation numbers. Only quote what your tools return.\n- If you have no tool to look something up or to book, say so plainly, and say what you would need.\n- Ask a short question only when the request is missing something you truly need.\n- Keep replies short: a few sentences or a short list.",
+      "tools": []
+    },
+    {
+      "rung": 3,
+      "key": "tooled",
+      "name": "v3 · tooled",
+      "adds": "Tools to search flights and hotels, and to book a trip.",
+      "model": "gemini-2.5-flash-lite",
+      "instructions": "You are the booking agent at Launch Control Travel Desk.\n\nThe traveler flies from New York (JFK). Plan trips that match every part of their request: dates, places, budget, and preferences.\n\nRules:\n- Never invent flights, hotels, prices, or confirmation numbers. Only quote what your tools return.\n- Use search_flights and search_hotels to find options, and book_trip to book once you have a trip that fits.\n- Ask a short question only when the request is missing something you truly need.\n- Keep replies short: a few sentences or a short list.",
+      "tools": ["search_flights", "search_hotels", "book_trip"]
+    },
+    {
+      "rung": 4,
+      "key": "upgraded",
+      "name": "v4 · upgraded",
+      "adds": "A stronger model.",
+      "model": "gemini-3.8-flash",
+      "instructions": "You are the booking agent at Launch Control Travel Desk.\n\nThe traveler flies from New York (JFK). Plan trips that match every part of their request: dates, places, budget, and preferences.\n\nRules:\n- Never invent flights, hotels, prices, or confirmation numbers. Only quote what your tools return.\n- Use search_flights and search_hotels to find options, and book_trip to book once you have a trip that fits.\n- Ask a short question only when the request is missing something you truly need.\n- Keep replies short: a few sentences or a short list.",
+      "tools": ["search_flights", "search_hotels", "book_trip"]
+    }
+  ]
+}

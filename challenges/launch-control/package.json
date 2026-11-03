@@ -1,0 +1,9 @@
+{
+  "name": "launch-control",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@launchdarkly/ai-server": "1.0.0",
+    "@launchdarkly/node-server-sdk": "9.16.0"
+  }
+}

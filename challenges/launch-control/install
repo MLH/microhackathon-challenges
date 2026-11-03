@@ -1,0 +1,8 @@
+#!/bin/sh
+# Installs LaunchDarkly's AI SDK and server SDK, which the page server uses to
+# read the booker's config, into this package's node_modules.
+set -eu
+
+# pwd -P resolves symlinks: npm ci fails on a --prefix that isn't a real path.
+package_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+npm ci --ignore-scripts --no-audit --no-fund --prefix "$package_dir"

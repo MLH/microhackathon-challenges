@@ -1,0 +1,6 @@
+#!/bin/sh
+# Setup hook: reset this session's target on the booker's config, write a fresh
+# runtime config into the workspace, and start the page server in the
+# background. Exits 0 once the page answers and the session is on v1.
+set -eu
+exec node "${BOOTHSTRAP_PACKAGE_DIR:-$(dirname "$0")}/server/setup.mjs"

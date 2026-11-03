@@ -1,0 +1,61 @@
+{
+  "id": "launch-control",
+  "title": "Launch Control: Travel Desk",
+  "tagline": "Upgrade a live AI agent's prompt, tools, and model with no redeploy.",
+  "icon": "icon.txt",
+  "type": "browser",
+  "agent": "pi",
+  "model": "google/gemini-3.8-flash",
+  "vault_services": [
+    "gemini",
+    "launchdarkly-sdk",
+    "launchdarkly-api"
+  ],
+  "points": 150,
+  "estimated_minutes": 10,
+  "learning_objectives": [
+    "configuring an AI agent at runtime",
+    "changing a model, prompt, and tools with no deploy",
+    "rolling an agent back instantly"
+  ],
+  "featured_tech": [
+    "LaunchDarkly"
+  ],
+  "intro": "intro.md",
+  "steps": [
+    {
+      "id": "meet-booker",
+      "title": "Meet the travel booker",
+      "hint": "Tap the suggested trip, or write your own, and send it to the booker.",
+      "done_when": "The page's accessibility snapshot holds the line \"booker-state v1 …\" whose tried= list contains 1."
+    },
+    {
+      "id": "add-prompt",
+      "title": "Give it a real prompt",
+      "hint": "Let Pi switch the booker to v2, then send your trip again.",
+      "done_when": "The page's accessibility snapshot holds the line \"booker-state v1 …\" whose tried= list contains 2."
+    },
+    {
+      "id": "add-tools",
+      "title": "Give it tools",
+      "hint": "Let Pi switch the booker to v3, then send your trip again.",
+      "done_when": "The page's accessibility snapshot holds the line \"booker-state v1 …\" whose tried= list contains 3."
+    },
+    {
+      "id": "add-model",
+      "title": "Upgrade its model",
+      "hint": "Let Pi switch the booker to v4, then send your trip again until it's booked.",
+      "done_when": "The page's accessibility snapshot holds the line \"booker-state v1 …\" whose tried= list contains 4 and which contains \"booked=yes\"."
+    },
+    {
+      "id": "debrief",
+      "title": "Tell your guide what changed",
+      "hint": "Say what changed at each rung, and why nothing was redeployed.",
+      "done_when": "All four rungs are tried and the participant has told the guide, in their own words, what changed and why no deploy was needed."
+    }
+  ],
+  "browser": {
+    "start_url": "http://127.0.0.1:4374/",
+    "monitor_skill": "monitor/SKILL.md"
+  }
+}
