@@ -1,8 +1,9 @@
 // Proves the birdsbirdbirds package: check-bird.mjs accepts real gallery
 // birds and rejects CSS that could escape the page's keyframes stylesheet; the
-// page server saves only PNGs to bird.png and serves only checked birds; the
-// setup and cleanup hooks start and stop it; the label never parses HTML; the
-// workspace watcher and its Pi extension report each new drawing once.
+// page server saves only PNGs to bird.png, records each new checked flight,
+// and sends it as waypoints on the gallery's stage; the setup and cleanup
+// hooks start and stop it; the label never parses HTML; the workspace watcher
+// and its Pi extension report each new drawing once.
 
 import assert from 'node:assert/strict'
 import { execFile, spawn, spawnSync } from 'node:child_process'
@@ -14,12 +15,15 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateSync } from 'node:zlib'
 
 import { DEFAULT_DEBOUNCE_MS, watchWorkspace } from '../challenges/birdsbirdbirds/bird-watcher.mjs'
 import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../challenges/birdsbirdbirds/check-bird.mjs'
 import birdsbirdbirdsExtension from '../challenges/birdsbirdbirds/extension.mjs'
+import { FLIGHTS_DIRECTORY } from '../challenges/birdsbirdbirds/flight-history.mjs'
+import { changedWaypoints, flightOf } from '../challenges/birdsbirdbirds/flight-path.mjs'
 import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
 
@@ -611,55 +615,147 @@ test('the server sends the page with a CSP that admits no inline styles and no b
   assert.doesNotMatch(response.body.toString(), /<style|style=/)
 }))
 
-test('the server answers 404 for bird.json before Pi writes it', (testContext) => withWorkspace(async ({ workspace }) => {
+/** GETs /flight.json and resolves its status and parsed body. */
+const getFlights = async (port) => {
+  const response = await sendRequest({ port, requestPath: '/flight.json', timeoutMs: 5000 })
+
+  return { status: response.status, text: response.body.toString(), flights: JSON.parse(response.body) }
+}
+
+/** Writes `entry` to the workspace's bird.json, as Pi's write tool does. */
+const writeBird = (workspace, entry) => writeFile(path.join(workspace, 'bird.json'), JSON.stringify(entry))
+
+/** Builds a bird whose css_keyframes is one frame per `transforms` entry, spread evenly from 0% to 100%. */
+const birdFlying = (transforms) => birdWithKeyframes(`@keyframes fly_test { ${transforms.map((transform, index) => `${(index * 100) / (transforms.length - 1)}% { transform: ${transform}; }`).join(' ')} }`)
+
+const FLIGHT_PATHS = [
+  {
+    behavior: 'converts vw, vh, px, em, and % to stage pixels',
+    keyframes: '0% { transform: translate(10vw, 10vh); } 50% { transform: translate(100px, 2em); } 100% { transform: translate(50%, 0); }',
+    waypoints: [{ n: 1, offset: 0, x: 100, y: 85 }, { n: 2, offset: 0.5, x: 100, y: 32 }, { n: 3, offset: 1, x: 60, y: 0 }],
+  },
+  {
+    behavior: 'adds untransformed waypoints where CSS starts and ends a flight that sets none there',
+    keyframes: '50% { transform: translateY(20vh); }',
+    waypoints: [{ n: 1, offset: 0, x: 0, y: 0 }, { n: 2, offset: 0.5, x: 0, y: 170 }, { n: 3, offset: 1, x: 0, y: 0 }],
+  },
+  {
+    behavior: 'merges frames that share an offset, the later declaration winning, and keeps opacity and easing',
+    keyframes: 'from, to { transform: translateX(10vw); } to { transform: translateX(20vw); opacity: 0.5; animation-timing-function: ease-out; }',
+    waypoints: [{ n: 1, offset: 0, x: 100, y: 0 }, { n: 2, offset: 1, x: 200, y: 0, opacity: 0.5, easing: 'ease-out' }],
+  },
+  {
+    behavior: 'adds up full turns and moves a box rotated before it is translated along the turned axis',
+    keyframes: 'from { transform: rotate(1turn); } to { transform: rotate(90deg) translateX(10vw) scale(9); }',
+    waypoints: [{ n: 1, offset: 0, x: 0, y: 0, rotate: 360 }, { n: 2, offset: 1, x: 0, y: 100, rotate: 90, scale: 5 }],
+  },
+]
+
+for (const { behavior, keyframes, waypoints } of FLIGHT_PATHS) {
+  test(`the flight path ${behavior}`, () => {
+    const entry = birdWithKeyframes(`@keyframes fly_test { ${keyframes} }`)
+
+    const flight = flightOf(entry, 1)
+
+    assert.deepEqual(flight.waypoints, waypoints)
+  })
+}
+
+test('a first flight has no changed waypoints, since nothing was revised', () => {
+  const flight = flightOf(birdEntry(), 1)
+
+  const changed = changedWaypoints(flight, undefined)
+
+  assert.deepEqual(changed, [])
+})
+
+test('the server sends no flight before Pi writes bird.json', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { status, flights } = await getFlights(port)
 
-  assert.equal(response.status, 404)
+  assert.equal(status, 200)
+  assert.deepEqual(flights, { current: null, previous: null, changed: [] })
 }))
 
-test('the server serves a bird.json that passes the checker', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server sends a passing bird.json as waypoints in stage pixels and records it as flight 001', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(GALLERY_BIRDS[0]))
+  await writeBird(workspace, birdFlying(['translate(10vw, 20vh)', 'translate(50vw, 40vh) rotate(-10deg)', 'translate(80vw, 60vh)']))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 200)
-  assert.deepEqual(JSON.parse(response.body), GALLERY_BIRDS[0])
+  assert.deepEqual(flights.current, {
+    version: 1,
+    bird_name: 'Robin',
+    origin: 'Durham, NC',
+    duration_s: 36,
+    timing_function: 'linear',
+    waypoints: [
+      { n: 1, offset: 0, x: 100, y: 170 },
+      { n: 2, offset: 0.5, x: 500, y: 340, rotate: -10 },
+      { n: 3, offset: 1, x: 800, y: 510 },
+    ],
+  })
+  assert.equal(flights.previous, null)
+  assert.deepEqual(await readdir(path.join(workspace, FLIGHTS_DIRECTORY)), ['001.json'])
 }))
 
-test('the server answers 422 for a failing bird.json and never serves its keyframes', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server marks the waypoints a revision moved and keeps the flight before it', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  const keyframes = '@keyframes fly_test { 0% { transform: url(https://evil.example/x.svg); } }'
-  await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(birdWithKeyframes(keyframes)))
+  await writeBird(workspace, birdFlying(['translate(10vw, 20vh)', 'translate(50vw, 40vh)', 'translate(80vw, 60vh)']))
+  await getFlights(port)
+  await writeBird(workspace, birdFlying(['translate(10vw, 20vh)', 'translate(50vw, 10vh)', 'translate(80vw, 60vh)', 'translate(85vw, 70vh)']))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
-  assert.ok(!response.body.toString().includes('evil.example'))
-  assert.match(JSON.parse(response.body).errors.join('\n'), /"url\(" is not allowed/)
+  assert.equal(flights.current.version, 2)
+  assert.equal(flights.previous.version, 1)
+  assert.deepEqual(flights.changed, [2, 4])
+  assert.deepEqual(await readdir(path.join(workspace, FLIGHTS_DIRECTORY)), ['001.json', '002.json'])
 }))
 
-test('the server answers 422 for a bird.json over the byte cap', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server records a rewrite of the same flight only once, whatever its key order', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const { bird_name: birdName, origin, animation } = birdEntry()
+  await writeBird(workspace, { bird_name: birdName, origin, animation })
+  await getFlights(port)
+  await writeBird(workspace, { animation, origin, bird_name: birdName })
+
+  const { flights } = await getFlights(port)
+
+  assert.equal(flights.current.version, 1)
+  assert.deepEqual(await readdir(path.join(workspace, FLIGHTS_DIRECTORY)), ['001.json'])
+}))
+
+test('the server records a new passing flight as the workspace changes, without the page asking', (testContext) => withWorkspace(async ({ workspace }) => {
+  await startBirdServer(testContext, workspace)
+  const flightFile = path.join(workspace, FLIGHTS_DIRECTORY, '001.json')
+
+  await writeBird(workspace, birdEntry())
+
+  const deadline = Date.now() + 3_000
+  while (!fs.existsSync(flightFile) && Date.now() < deadline) await sleep(50)
+  assert.deepEqual(JSON.parse(await readFile(flightFile, 'utf8')), birdEntry())
+}))
+
+test('the server never records or sends a failing bird.json, nor any of its text', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  await writeBird(workspace, birdWithKeyframes('@keyframes fly_test { 0% { transform: url(https://evil.example/x.svg); } }'))
+
+  const { flights, text } = await getFlights(port)
+
+  assert.equal(flights.current, null)
+  assert.ok(!text.includes('evil.example'))
+  assert.equal(fs.existsSync(path.join(workspace, FLIGHTS_DIRECTORY)), false)
+}))
+
+test('the server sends no flight for a bird.json over the byte cap', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
   await writeFile(path.join(workspace, 'bird.json'), ' '.repeat(MAX_BIRD_FILE_BYTES + 1))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
-}))
-
-test('the server refuses a symlinked bird.json without echoing its target', (testContext) => withWorkspace(async ({ directory, workspace }) => {
-  const port = await startBirdServer(testContext, workspace)
-  const target = path.join(directory, 'secret.txt')
-  await writeFile(target, 'top-secret-line')
-  await symlink(target, path.join(workspace, 'bird.json'))
-
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
-
-  assert.equal(response.status, 422)
-  assert.ok(!response.body.toString().includes('top-secret'), response.body.toString())
+  assert.equal(flights.current, null)
 }))
 
 test('the server refuses a symlinked bird.json even when its target is a valid bird', (testContext) => withWorkspace(async ({ directory, workspace }) => {
@@ -668,10 +764,22 @@ test('the server refuses a symlinked bird.json even when its target is a valid b
   await writeFile(target, JSON.stringify(GALLERY_BIRDS[0]))
   await symlink(target, path.join(workspace, 'bird.json'))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
-  assert.match(JSON.parse(response.body).errors.join('\n'), /bird.json is not a regular file/)
+  assert.equal(flights.current, null)
+}))
+
+test('the server refuses to record flights into a symlinked .flights directory', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const elsewhere = path.join(directory, 'elsewhere')
+  await mkdir(elsewhere)
+  await symlink(elsewhere, path.join(workspace, FLIGHTS_DIRECTORY))
+  await writeBird(workspace, birdEntry())
+
+  const response = await sendRequest({ port, requestPath: '/flight.json' })
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(await readdir(elsewhere), [])
 }))
 
 /**
@@ -765,13 +873,13 @@ const startServerProcess = async (testContext, workspace) => {
   return port
 }
 
-test('the server answers 422 for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server sends no flight for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startServerProcess(testContext, workspace)
   makeFifo(path.join(workspace, 'bird.json'))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json', timeoutMs: 5000 })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
+  assert.equal(flights.current, null)
   assert.equal((await sendRequest({ port, requestPath: '/health', timeoutMs: 5000 })).status, 200)
 }))
 

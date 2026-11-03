@@ -1,19 +1,21 @@
 // Serves the drawing page and the sky on 127.0.0.1. The page saves the
-// participant's drawing as <workspace>/bird.png and polls bird.json, which is
-// served only once check-bird.mjs passes it, so nothing unchecked reaches the
-// page's keyframes stylesheet.
+// participant's drawing as <workspace>/bird.png and polls /flight.json: the
+// latest flight that passed check-bird.mjs and the one before it, as
+// waypoints on the gallery's sky stage. The page gets numbers only, never
+// bird.json's CSS text.
 //
 // Run as `node server.mjs` with BIRDSBIRDBIRDS_WORKSPACE (absolute),
 // BIRDSBIRDBIRDS_TOKEN, and optionally BIRDSBIRDBIRDS_PORT (default 4322).
 // Exits with code 3 when the port is busy.
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { lstat, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { isRunDirectly, loadBirdFile } from './check-bird.mjs'
+import { isRunDirectly } from './check-bird.mjs'
+import { readFlightHistory, recordFlight, watchFlights } from './flight-history.mjs'
 import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const DEFAULT_PORT = 4322
@@ -53,6 +55,8 @@ export function sha256Hex(text) {
  * Creates the page server for `workspace` (absolute). `token` authorises
  * POST /shutdown. The server is not listening yet; the Host and Origin checks
  * use whatever port it is later bound to, so tests can listen on port 0.
+ * While it listens, it records each new passing flight as the workspace
+ * changes.
  */
 export function createBirdServer({ workspace, token }) {
   if (!path.isAbsolute(workspace)) throw new Error(`workspace must be an absolute path, got ${JSON.stringify(workspace)}`)
@@ -65,8 +69,21 @@ export function createBirdServer({ workspace, token }) {
       sendText(response, 500, 'internal error')
     })
   })
+  recordFlightsWhileListening(server, workspace)
 
   return server
+}
+
+/** Watches `workspace` for new flights from when `server` listens until it closes. */
+function recordFlightsWhileListening(server, workspace) {
+  let flightWatcher
+  server.on('listening', () => {
+    flightWatcher = watchFlights({
+      workspace,
+      onError: (error) => console.error(`birdsbirdbirds server: recording a flight failed: ${error.message}`),
+    })
+  })
+  server.on('close', () => flightWatcher?.stop())
 }
 
 /** Routes one request after the Host check; paths match exactly, with no normalisation. */
@@ -81,7 +98,7 @@ async function handleRequest({ server, workspace, token, request, response }) {
   if (route === 'GET /health') return sendJson(response, 200, { instance: sha256Hex(token) })
   if (route === 'GET /bird.png') return sendSavedBird(response, workspace)
   if (route === 'POST /bird.png') return saveBird({ request, response, workspace, port })
-  if (route === 'GET /bird.json') return sendBirdEntry(response, workspace)
+  if (route === 'GET /flight.json') return sendFlights(response, workspace)
   if (route === 'POST /shutdown') return shutDown({ server, token, request, response })
 
   sendText(response, 404, 'not found')
@@ -124,22 +141,13 @@ function sendSavedBird(response, workspace) {
 }
 
 /**
- * Serves <workspace>/bird.json only when check-bird.mjs passes it: 404 when
- * missing, 422 with the checker's errors (and never the entry) otherwise.
+ * Records bird.json if it is a new passing flight, so the page never waits
+ * on the watcher, then sends `{ current, previous, changed }`.
  */
-async function sendBirdEntry(response, workspace) {
-  const birdFile = path.join(workspace, 'bird.json')
-  try {
-    await lstat(birdFile)
-  } catch (error) {
-    if (error.code === 'ENOENT') return sendText(response, 404, 'no bird.json yet')
-    throw error
-  }
+function sendFlights(response, workspace) {
+  recordFlight(workspace)
 
-  const { entry, errors } = loadBirdFile(birdFile)
-  if (errors.length > 0) return sendJson(response, 422, { errors })
-
-  sendJson(response, 200, entry)
+  sendJson(response, 200, readFlightHistory(workspace))
 }
 
 /**

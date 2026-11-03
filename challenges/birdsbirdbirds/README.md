@@ -15,6 +15,8 @@ published to the booth screens as a `birds-v1` gallery item.
 | `extension.mjs` | Pi extension: tells Pi about each saved drawing (see below) |
 | `bird-watcher.mjs` | Watches the workspace for a new `bird.png` |
 | `check-bird.mjs` | Checks `bird.json`; `node check-bird.mjs [path]` |
+| `flight-path.mjs` | Turns a checked flight into waypoints on the gallery's stage |
+| `flight-history.mjs` | Records each new passing flight in `.flights/` |
 | `server.mjs` | Local page server on `127.0.0.1:4322` |
 | `workspace-file.mjs` | Reads `bird.json` and `bird.png` only as capped regular files |
 | `setup`, `cleanup` | Start and stop the server (hooks in `hooks/`) |
@@ -36,6 +38,32 @@ checker itself, so `animate` needs no message.
 
 The server listens on port 4322. Set `BIRDSBIRDBIRDS_PORT` to use another
 port, though the skill and the challenge expect 4322.
+
+## Flight history
+
+While the page server runs, each `bird.json` that passes the checker and
+differs from the last recorded flight is copied to
+`<workspace>/.flights/NNN.json`, numbered from `001`. The server checks on
+any change in the workspace, debounced, and again whenever the page asks, so
+it never depends on what `fs.watch` reports.
+
+`GET /flight.json` answers `{ current, previous, changed }`. `current` and
+`previous` are the two latest recorded flights, or `null`:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | The flight's number in `.flights/` |
+| `bird_name`, `origin` | From `bird.json` |
+| `duration_s` | One flight's playback time: `animation.duration` slowed 3 times, as the gallery plays it |
+| `timing_function` | `animation.timing_function` |
+| `waypoints` | `{ n, offset, x, y }`, plus `rotate` (degrees), `scale`, `opacity`, and `easing` when set |
+
+Waypoints are numbered from 1, one per keyframe offset that sets a
+`transform`, in offset order. `x` and `y` are the bird box's top-left corner
+in pixels on the gallery's 1000 by 850 stage: 1vw is 10px and 1vh is 8.5px,
+as the gallery converts them, and a translate percentage is a share of the
+120px bird box. `changed` lists the current waypoints whose position or
+transform differs from the previous flight's waypoint of the same number.
 
 ## Run without boothstrap
 
