@@ -20,6 +20,9 @@ const TAKE_OFF_PAUSE_MS = 500
 /** The mask path's normalised length, matching its pathLength attribute in index.html. */
 const MASK_PATH_LENGTH = 1000
 
+/** How far, in stage pixels, a waypoint may sit from an old one and still count as the same spot. */
+const MOVED_TOLERANCE_PIXELS = 0.5
+
 /** How long a waypoint stays lit, as a share of a flight, after the bird passes it. */
 const PASS_GLOW_SHARE = 0.05
 
@@ -81,7 +84,7 @@ export function showFlights({ current, previous, changed }) {
   drawPath(points, drawMs)
   highlightChanges({ current, changed, points, shares, drawMs })
   const markers = popInWaypoints({ current, changed, points, shares, drawMs })
-  markMovedWaypoints({ current, previous, changed })
+  markMovedWaypoints({ current, previous })
   later(() => takeOff(current, markers), drawMs + TAKE_OFF_PAUSE_MS)
 }
 
@@ -196,13 +199,17 @@ function popInWaypoints({ current, changed, points, shares, drawMs }) {
   return markers
 }
 
-/** Leaves a dashed marker where each changed waypoint used to be. */
-function markMovedWaypoints({ current, previous, changed }) {
+/**
+ * Leaves a dashed marker, with its old number, wherever the previous flight
+ * had a waypoint that no current waypoint sits on: the spots the revision
+ * moved or removed.
+ */
+function markMovedWaypoints({ current, previous }) {
   if (previous === null) return
 
-  const previousPoints = pathPoints(previous.waypoints)
-  const oldMarkers = previousPoints
-    .filter((point) => changed.includes(point.n) && current.waypoints.some((waypoint) => waypoint.n === point.n))
+  const currentPoints = pathPoints(current.waypoints)
+  const oldMarkers = pathPoints(previous.waypoints)
+    .filter((point) => !currentPoints.some((now) => Math.hypot(now.x - point.x, now.y - point.y) <= MOVED_TOLERANCE_PIXELS))
     .map((point) => {
       const marker = waypointMarker(point.n, point)
       marker.classList.add('old')

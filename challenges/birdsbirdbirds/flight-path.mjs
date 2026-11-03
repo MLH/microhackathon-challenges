@@ -51,28 +51,26 @@ export function flightOf(entry, version) {
 }
 
 /**
- * The numbers of the waypoints in `current` that moved, turned, or resized
- * since `previous`, or that `previous` lacks. Empty when there is no
- * previous flight, since nothing has been revised yet.
+ * The numbers of the waypoints in `current` that no waypoint of `previous`
+ * matches in position and transform, whatever its number: inserting a loop
+ * renumbers every waypoint after it, but those that didn't move stay
+ * unchanged. Empty when there is no previous flight, since nothing has been
+ * revised yet.
  */
 export function changedWaypoints(current, previous) {
   if (previous === undefined) return []
 
-  const previousByNumber = new Map(previous.waypoints.map((waypoint) => [waypoint.n, waypoint]))
-
   return current.waypoints
-    .filter((waypoint) => isChanged(waypoint, previousByNumber.get(waypoint.n)))
+    .filter((waypoint) => !previous.waypoints.some((before) => isSamePlacement(waypoint, before)))
     .map((waypoint) => waypoint.n)
 }
 
-/** True when `waypoint` differs in position or transform from `before`, or `before` is missing. */
-function isChanged(waypoint, before) {
-  if (before === undefined) return true
-
-  return Math.abs(waypoint.x - before.x) > CHANGE_TOLERANCE.position
+/** True when `waypoint` and `before` place the bird alike, within CHANGE_TOLERANCE. */
+function isSamePlacement(waypoint, before) {
+  return !(Math.abs(waypoint.x - before.x) > CHANGE_TOLERANCE.position
     || Math.abs(waypoint.y - before.y) > CHANGE_TOLERANCE.position
     || Math.abs((waypoint.rotate ?? 0) - (before.rotate ?? 0)) > CHANGE_TOLERANCE.rotate
-    || Math.abs((waypoint.scale ?? 1) - (before.scale ?? 1)) > CHANGE_TOLERANCE.scale
+    || Math.abs((waypoint.scale ?? 1) - (before.scale ?? 1)) > CHANGE_TOLERANCE.scale)
 }
 
 /**

@@ -93,7 +93,8 @@ Waypoints are numbered from 1, one per keyframe offset that sets a
 in pixels on the gallery's 1000 by 850 stage: 1vw is 10px and 1vh is 8.5px,
 as the gallery converts them, and a translate percentage is a share of the
 120px bird box. `changed` lists the current waypoints whose position or
-transform differs from the previous flight's waypoint of the same number.
+transform matches no waypoint of the previous flight, whatever its number,
+so inserting waypoints doesn't mark the unchanged ones after them.
 
 ## The flock
 

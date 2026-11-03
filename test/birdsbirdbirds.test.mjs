@@ -736,6 +736,15 @@ test('the sky staggers flock birds 2.3 seconds apart within one slowed flight, a
   assert.deepEqual(starts.map((seconds) => Number(seconds.toFixed(2))), [0, 2.3, 4.6, 9])
 })
 
+test('inserting a loop marks only the new waypoints, not the unchanged ones it renumbers', () => {
+  const before = flightOf(birdFlying(['translate(5vw, 60vh)', 'translate(25vw, 40vh)', 'translate(45vw, 50vh)', 'translate(65vw, 30vh)', 'translate(85vw, 40vh)']), 1)
+  const after = flightOf(birdFlying(['translate(5vw, 60vh)', 'translate(25vw, 40vh)', 'translate(45vw, 50vh)', 'translate(50vw, 40vh)', 'translate(45vw, 30vh)', 'translate(40vw, 40vh)', 'translate(65vw, 30vh)', 'translate(85vw, 40vh)']), 2)
+
+  const changed = changedWaypoints(after, before)
+
+  assert.deepEqual(changed, [4, 5, 6])
+})
+
 test('the server sends no flight before Pi writes bird.json', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
 
