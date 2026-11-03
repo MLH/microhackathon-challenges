@@ -6,6 +6,11 @@
   --error: #b42318;
   --success: #1e7b34;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --rounded-font: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif;
+  --night: #16213f;
+  --marker: #ffffff;
+  --sunlight: #f8b92a;
+  --chip: rgb(14 22 48 / 76%);
 }
 
 * {
@@ -259,62 +264,136 @@ button:disabled {
   color: var(--error);
 }
 
-.waiting {
-  margin: 0;
-  font-size: 0.9rem;
-  text-align: center;
-  opacity: 0.7;
-}
-
-.link-button {
-  padding: 2px;
-  border: none;
-  background: none;
-  font-size: 1rem;
-  font-weight: 700;
-  text-decoration: underline;
-}
-
+/* The sky is the gallery's 1000x850 stage, scaled by sky.mjs to fit the
+   window, so the flight looks as it will on the booth screens. */
 #sky-mode {
   position: fixed;
   inset: 0;
+  display: grid;
+  place-items: center;
   overflow: hidden;
-  background: var(--slide-blue);
+  background: #1b3f78;
+  font-family: var(--rounded-font);
 }
 
-#sky {
-  position: absolute;
-  inset: 0;
+.stage-frame {
+  position: relative;
+  overflow: hidden;
+  border-radius: 14px;
+  box-shadow: 0 10px 40px rgb(0 0 0 / 35%);
 }
 
-.sky-title {
+.stage {
   position: absolute;
-  top: 32px;
-  left: 40px;
-  font-size: clamp(2rem, 6vw, 5rem);
-  font-weight: 800;
-  line-height: 1.1;
-  opacity: 0.85;
-}
-
-.bird-wrapper {
-  position: absolute;
-  /* The keyframes place the bird; translate(x, y) is measured from here. */
   top: 0;
   left: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
+  width: 1000px;
+  height: 850px;
+  overflow: hidden;
+  transform-origin: 0 0;
+  background:
+    radial-gradient(circle at 86% 30%, rgb(255 246 218 / 90%) 0, rgb(255 236 190 / 45%) 7%, rgb(255 230 180 / 0%) 28%),
+    linear-gradient(180deg, #3a86de 0%, #64aaec 30%, #9fcff5 58%, #dcEFfb 80%, #fde7c6 100%);
+}
+
+.sun {
+  position: absolute;
+  top: 210px;
+  left: 820px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: radial-gradient(circle, #fffdf0 0 55%, #ffe9a8 100%);
+  box-shadow: 0 0 60px 28px rgb(255 238 170 / 55%), 0 0 170px 90px rgb(255 238 170 / 22%);
+  animation: sun-pulse 5s ease-in-out infinite alternate;
+}
+
+@keyframes sun-pulse {
+  to {
+    transform: scale(1.07);
+  }
+}
+
+.cloud {
+  position: absolute;
+  left: 0;
+  width: 340px;
+  height: 130px;
+  background:
+    radial-gradient(closest-side, rgb(255 255 255 / 97%) 60%, rgb(255 255 255 / 0%)) 26px 40px / 150px 78px no-repeat,
+    radial-gradient(closest-side, rgb(255 255 255 / 97%) 60%, rgb(255 255 255 / 0%)) 92px 4px / 156px 112px no-repeat,
+    radial-gradient(closest-side, rgb(255 255 255 / 97%) 60%, rgb(255 255 255 / 0%)) 176px 24px / 140px 92px no-repeat,
+    radial-gradient(closest-side, rgb(214 228 244 / 95%) 58%, rgb(214 228 244 / 0%)) 8px 70px / 324px 58px no-repeat;
+  animation: drift linear infinite;
+}
+
+.cloud-far {
+  opacity: 0.5;
+  filter: blur(2.5px);
+}
+
+.cloud-mid {
+  opacity: 0.82;
+  filter: blur(1px);
+}
+
+.cloud-a {
+  top: 40px;
+  animation-duration: 260s;
+  animation-delay: -60s;
+}
+
+.cloud-b {
+  top: 170px;
+  animation-duration: 300s;
+  animation-delay: -190s;
+}
+
+.cloud-c {
+  top: 330px;
+  animation-duration: 280s;
+  animation-delay: -120s;
+}
+
+.cloud-d {
+  top: 520px;
+  animation-duration: 190s;
+  animation-delay: -120s;
+}
+
+@keyframes drift {
+  from {
+    transform: translateX(-560px);
+  }
+
+  to {
+    transform: translateX(1040px);
+  }
+}
+
+.hills {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  display: block;
+}
+
+/* The gallery draws every bird in a 120px box at top-left of the stage;
+   its flight's translate moves the box from there. */
+.flight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 120px;
   will-change: transform;
 }
 
 .bird {
   display: block;
-  max-width: 240px;
-  max-height: 240px;
+  width: 120px;
+  height: 120px;
+  object-fit: contain;
   animation: flap 1.2s ease-in-out infinite alternate;
-  filter: contrast(1.1);
 }
 
 @keyframes flap {
@@ -327,35 +406,231 @@ button:disabled {
   }
 }
 
-.bird-label {
+.flock {
+  position: absolute;
+  inset: 0;
+  opacity: 0.3;
+  filter: saturate(0.5);
+}
+
+.paths {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+.paths path {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.draw-mask-path {
+  stroke: #fff;
+  stroke-width: 40;
+  stroke-dasharray: 1000;
+}
+
+.ghost-path {
+  stroke: #fff;
+  stroke-opacity: 0.55;
+  stroke-width: 3;
+  stroke-dasharray: 2 12;
+}
+
+.changed-segment {
+  stroke: var(--sunlight);
+  stroke-opacity: 0.55;
+  stroke-width: 18;
+}
+
+.path-shadow {
+  stroke: var(--night);
+  stroke-opacity: 0.14;
+  stroke-width: 12;
+}
+
+.path-dots {
+  stroke: #fff;
+  stroke-width: 5;
+  stroke-dasharray: 1 13;
+}
+
+.waypoints {
+  position: absolute;
+  inset: 0;
+}
+
+.waypoint {
+  position: absolute;
   display: flex;
-  gap: 0.4em;
-  padding: 4px 12px;
-  border: 2px solid var(--slide-text);
-  border-radius: 20px;
-  background: rgb(255 255 255 / 90%);
-  box-shadow: 2px 2px 0 var(--slide-lime);
-  font-size: 14px;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border: 3px solid var(--night);
+  border-radius: 50%;
+  background: var(--marker);
+  box-shadow: 0 3px 0 rgb(22 33 63 / 30%);
+  color: var(--night);
+  font-size: 16px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+}
+
+.waypoint.changed {
+  background: var(--sunlight);
+}
+
+.waypoint.changed::after {
+  position: absolute;
+  inset: -6px;
+  border: 3px solid var(--sunlight);
+  border-radius: 50%;
+  content: "";
+  animation: ring 1.8s ease-out infinite;
+}
+
+@keyframes ring {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+
+  to {
+    transform: scale(2.1);
+    opacity: 0;
+  }
+}
+
+.waypoint.old {
+  width: 30px;
+  height: 30px;
+  margin: -15px 0 0 -15px;
+  border: 2px dashed rgb(255 255 255 / 85%);
+  background: none;
+  box-shadow: none;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.perch {
+  position: absolute;
+  top: 300px;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 1000px;
+  gap: 12px;
+}
+
+.perch-bird {
+  width: 160px;
+  height: 160px;
+  animation: bob 2.4s ease-in-out infinite alternate;
+}
+
+@keyframes bob {
+  from {
+    transform: translateY(-8px) rotate(-3deg);
+  }
+
+  to {
+    transform: translateY(8px) rotate(3deg);
+  }
+}
+
+.perch-hint {
+  margin: 0;
+  padding: 8px 18px;
+  border-radius: 999px;
+  background: var(--chip);
+  color: #fff;
+  font-size: 24px;
+  font-weight: 600;
+}
+
+.chip,
+.foot {
+  position: absolute;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--chip);
+  color: #fff;
   white-space: nowrap;
 }
 
-.bird-label .origin {
+.chip {
+  top: 14px;
+  height: 40px;
+  padding: 0 16px 0 10px;
+  box-shadow: 0 6px 20px rgb(20 40 90 / 25%);
+  font-size: 16px;
   font-weight: 500;
 }
 
-.draw-again-button {
-  position: absolute;
-  right: 28px;
-  bottom: 28px;
-  z-index: 200;
-  min-height: 60px;
-  padding: 10px 28px;
-  border: 3px solid var(--slide-text);
-  border-radius: 16px;
-  background: var(--slide-lime);
-  box-shadow: 4px 4px 0 var(--slide-text);
-  font-size: 1.3rem;
-  font-weight: 800;
+.chip em {
+  font-style: normal;
+  color: #c9d6f5;
+}
+
+.status-chip {
+  left: 14px;
+}
+
+.chip-dot {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--sunlight);
+}
+
+.name-chip {
+  right: 14px;
+  max-width: 45vw;
+  padding-left: 4px;
+}
+
+.chip-bird {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.bird-label {
+  display: flex;
+  gap: 0.4em;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.bird-label .origin {
+  font-weight: 400;
+  color: #c9d6f5;
+}
+
+.foot {
+  bottom: 14px;
+  left: 14px;
+  height: 32px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sun,
+  .cloud,
+  .perch-bird,
+  .waypoint.changed::after {
+    animation: none;
+  }
 }

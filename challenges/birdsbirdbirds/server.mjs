@@ -37,6 +37,8 @@ const STATIC_FILES = {
   '/': { file: 'index.html', contentType: 'text/html; charset=utf-8' },
   '/app.mjs': { file: 'app.mjs', contentType: 'text/javascript; charset=utf-8' },
   '/bird-label.mjs': { file: 'bird-label.mjs', contentType: 'text/javascript; charset=utf-8' },
+  '/flight-motion.mjs': { file: 'flight-motion.mjs', contentType: 'text/javascript; charset=utf-8' },
+  '/sky.mjs': { file: 'sky.mjs', contentType: 'text/javascript; charset=utf-8' },
   '/style.css': { file: 'style.css', contentType: 'text/css; charset=utf-8' },
 }
 

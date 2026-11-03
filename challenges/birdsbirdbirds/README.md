@@ -20,7 +20,7 @@ published to the booth screens as a `birds-v1` gallery item.
 | `server.mjs` | Local page server on `127.0.0.1:4322` |
 | `workspace-file.mjs` | Reads `bird.json` and `bird.png` only as capped regular files |
 | `setup`, `cleanup` | Start and stop the server (hooks in `hooks/`) |
-| `page/` | The drawing canvas and the sky |
+| `page/` | The drawing canvas and the display-only sky |
 
 There is no `install` hook: the package, extension included, has no
 dependencies beyond Node.
@@ -38,6 +38,22 @@ checker itself, so `animate` needs no message.
 
 The server listens on port 4322. Set `BIRDSBIRDBIRDS_PORT` to use another
 port, though the skill and the challenge expect 4322.
+
+## The page
+
+The page opens on the drawing canvas until a drawing is saved, and on the sky
+after. A save switches to the sky by itself. For a redraw, Pi opens
+`http://127.0.0.1:4322/?draw`, which shows the canvas again.
+
+The sky takes no input: the participant directs the flight by talking to Pi.
+It is the gallery's 1000 by 850 stage, scaled to fit the window, with each
+bird in the gallery's 120px box, flights slowed 3 times, and flock birds
+started 2.3 s apart, so the flight looks as it will on the booth screens.
+When a new flight arrives, its path draws itself on as a dotted line of
+straight segments, as CSS moves the bird between keyframes, then its numbered
+waypoints pop in, then the bird flies it. After a revision the previous path
+stays as a faint ghost, with the changed waypoints and the segments touching
+them highlighted. A chip names the bird and its origin.
 
 ## Flight history
 

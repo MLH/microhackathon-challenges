@@ -25,6 +25,7 @@ import birdsbirdbirdsExtension from '../challenges/birdsbirdbirds/extension.mjs'
 import { FLIGHTS_DIRECTORY } from '../challenges/birdsbirdbirds/flight-history.mjs'
 import { changedWaypoints, flightOf } from '../challenges/birdsbirdbirds/flight-path.mjs'
 import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
+import { changedSegments, flightKeyframes, flockStartSeconds } from '../challenges/birdsbirdbirds/page/flight-motion.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -667,6 +668,32 @@ test('a first flight has no changed waypoints, since nothing was revised', () =>
   const changed = changedWaypoints(flight, undefined)
 
   assert.deepEqual(changed, [])
+})
+
+test('the sky eases each keyframe with the flight timing function unless the frame sets its own, as CSS does', () => {
+  const flight = flightOf(birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(0, 10vh); } 50% { transform: translate(50vw, 0) rotate(5deg) scale(2); opacity: 0.5; animation-timing-function: ease-in; } 100% { transform: translate(90vw, 0); } }'), 1)
+
+  const keyframes = flightKeyframes(flight)
+
+  assert.deepEqual(keyframes, [
+    { offset: 0, transform: 'translate(0px, 85px) rotate(0deg) scale(1)', easing: 'linear' },
+    { offset: 0.5, transform: 'translate(500px, 0px) rotate(5deg) scale(2)', easing: 'ease-in', opacity: 0.5 },
+    { offset: 1, transform: 'translate(900px, 0px) rotate(0deg) scale(1)', easing: 'linear' },
+  ])
+})
+
+test('the sky highlights every segment touching a changed waypoint', () => {
+  const waypoints = [1, 2, 3, 4, 5].map((n) => ({ n }))
+
+  const segments = changedSegments(waypoints, [2, 5])
+
+  assert.deepEqual(segments, [{ from: 0, to: 1 }, { from: 1, to: 2 }, { from: 3, to: 4 }])
+})
+
+test('the sky staggers flock birds 2.3 seconds apart within one flight, as the gallery does', () => {
+  const starts = [0, 1, 2, 30].map((position) => flockStartSeconds(position, 30))
+
+  assert.deepEqual(starts.map((seconds) => Number(seconds.toFixed(2))), [0, 2.3, 4.6, 9])
 })
 
 test('the server sends no flight before Pi writes bird.json', (testContext) => withWorkspace(async ({ workspace }) => {

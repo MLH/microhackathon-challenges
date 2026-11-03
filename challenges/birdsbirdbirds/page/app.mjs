@@ -1,10 +1,10 @@
 // The BirdsBirdBirds page: a canvas to draw the bird and save it as
-// bird.png, then a sky where it flies once Pi's bird.json passes the checker.
-// The server only ever serves a checked bird.json, so its keyframes are safe
-// to adopt as a constructed stylesheet; the page needs no inline <style>, so
-// its CSP can refuse them.
+// bird.png, then the display-only sky where Pi's flights draw themselves and
+// fly. The page opens on the canvas until a drawing is saved, and on the sky
+// after; Pi reopens the canvas for a redraw at /?draw. The sky polls
+// /flight.json, which holds numbers only, never bird.json's CSS.
 
-import { createBirdLabel } from './bird-label.mjs'
+import { fitStage, setBirdImage, showFlights, showFlock } from './sky.mjs'
 
 const COLOURS = [
   { name: 'Black', value: '#1f1f1f' },
@@ -20,10 +20,8 @@ const PEN_SIZES = [
   { name: 'Thick', width: 28 },
 ]
 const MAX_UNDO_STEPS = 20
-const POLL_INTERVAL_MS = 2000
-
-// The gallery slows every flight down three times so birds float gently.
-const FLIGHT_SLOWDOWN = 3
+const FLIGHT_POLL_INTERVAL_MS = 1500
+const FLOCK_REFRESH_MS = 60_000
 
 const drawMode = document.getElementById('draw-mode')
 const skyMode = document.getElementById('sky-mode')
@@ -37,10 +35,6 @@ const undoButton = document.getElementById('undo-button')
 const clearButton = document.getElementById('clear-button')
 const saveButton = document.getElementById('save-button')
 const statusLine = document.getElementById('status')
-const waitingNote = document.getElementById('waiting-note')
-const toSkyButton = document.getElementById('to-sky-button')
-const drawAgainButton = document.getElementById('draw-again-button')
-const sky = document.getElementById('sky')
 
 // The starting prompt is written once, in index.html, and read back here.
 const INITIAL_PROMPT = statusLine.textContent
@@ -50,7 +44,7 @@ const EMPTY_CANVAS_ERROR = 'The canvas is empty. Draw your bird first!'
 const pen = { colour: COLOURS[0].value, width: PEN_SIZES[1].width, erasing: false }
 const stroke = { pointerId: undefined, lastPoint: undefined }
 const undoSnapshots = []
-const flight = { entryText: undefined, entry: undefined, imageVersion: 0 }
+const sky = { polling: false, flightsText: undefined, flockText: undefined, imageVersion: 0 }
 
 /** Shows `text` on the status line; `tone` is 'info', 'success', or 'error'. */
 function setStatus(text, tone = 'info') {
@@ -245,6 +239,9 @@ async function saveBird() {
     if (response.status === 413) return setStatus('That drawing is too big to save. Try Clear and a simpler bird.', 'error')
     if (!response.ok) return setStatus(`Saving failed (${response.status}). Try again, or ask the booth staff.`, 'error')
     setStatus('Saved! Pi is taking a look.', 'success')
+    sky.imageVersion += 1
+    history.replaceState(null, '', '/')
+    showSky()
   } catch (error) {
     setStatus(`Saving failed: ${error.message}. Try again, or ask the booth staff.`, 'error')
   } finally {
@@ -252,87 +249,69 @@ async function saveBird() {
   }
 }
 
-/** The constructed stylesheet holding the current bird's keyframes, once one has flown. */
-let keyframesSheet
-
-/** Replaces the bird's keyframes sheet with one holding `css`, leaving any other adopted sheets in place. */
-function adoptKeyframes(css) {
-  const sheet = new CSSStyleSheet()
-  sheet.replaceSync(css)
-  const otherSheets = document.adoptedStyleSheets.filter((adopted) => adopted !== keyframesSheet)
-  document.adoptedStyleSheets = [...otherSheets, sheet]
-  keyframesSheet = sheet
+/** True when the participant has saved a drawing. */
+async function hasSavedBird() {
+  try {
+    return (await fetch('/bird.png', { cache: 'no-store' })).ok
+  } catch {
+    return false
+  }
 }
 
-/** Puts the bird from a checked entry in the sky, replacing any bird and keyframes already there. */
-function renderFlyingBird(entry) {
-  const { bird_name: birdName, origin, animation } = entry
-  adoptKeyframes(animation.css_keyframes)
-  flight.imageVersion += 1
-
-  const wrapper = document.createElement('div')
-  wrapper.className = 'bird-wrapper'
-  const durationSeconds = Number.parseFloat(animation.duration) * FLIGHT_SLOWDOWN
-  wrapper.style.animation = `${animation.animation_name} ${durationSeconds}s ${animation.timing_function} infinite`
-
-  const image = document.createElement('img')
-  image.className = 'bird'
-  image.alt = 'Your bird'
-  image.src = `/bird.png?v=${flight.imageVersion}`
-  wrapper.appendChild(image)
-  wrapper.appendChild(createBirdLabel(document, { birdName, origin }))
-
-  sky.replaceChildren(wrapper)
-}
-
-/** Shows the sky with the latest checked bird. */
-function showSky() {
-  renderFlyingBird(flight.entry)
-  drawMode.hidden = true
-  skyMode.hidden = false
-}
-
-/** Goes back to the canvas, keeping the drawing. */
+/** Shows the canvas. */
 function showDraw() {
   skyMode.hidden = true
   drawMode.hidden = false
-  sky.replaceChildren()
-  setStatus(isCanvasBlank() ? INITIAL_PROMPT : DRAWN_PROMPT)
-  toSkyButton.hidden = flight.entry === undefined
 }
 
-/** Fetches bird.json and flies the bird whenever a new checked entry appears. */
-async function pollBirdEntry() {
-  let response
+/** Shows the sky with the saved drawing, and starts following flights and the flock. */
+function showSky() {
+  setBirdImage(`/bird.png?v=${sky.imageVersion}`)
+  drawMode.hidden = true
+  skyMode.hidden = false
+  fitStage()
+  if (sky.polling) return
+
+  sky.polling = true
+  keepPolling(pollFlights, FLIGHT_POLL_INTERVAL_MS)
+  keepPolling(pollFlock, FLOCK_REFRESH_MS)
+}
+
+/** Fetches /flight.json and redraws the sky whenever it changes. */
+async function pollFlights() {
+  const flightsText = await fetchText('/flight.json')
+  if (flightsText === undefined || flightsText === sky.flightsText) return
+
+  sky.flightsText = flightsText
+  showFlights(JSON.parse(flightsText))
+}
+
+/** Fetches /flock.json and refreshes the flock whenever it changes. */
+async function pollFlock() {
+  const flockText = await fetchText('/flock.json')
+  if (flockText === undefined || flockText === sky.flockText) return
+
+  sky.flockText = flockText
+  showFlock(JSON.parse(flockText))
+}
+
+/** The body of a successful GET of `url`, or undefined when the page server can't answer; the next poll retries. */
+async function fetchText(url) {
   try {
-    response = await fetch('/bird.json', { cache: 'no-store' })
+    const response = await fetch(url, { cache: 'no-store' })
+
+    return response.ok ? await response.text() : undefined
   } catch {
-    waitingNote.textContent = 'Can’t reach the page server right now. Retrying…'
-    waitingNote.hidden = false
-    return
+    return undefined
   }
-
-  if (response.status === 422) {
-    waitingNote.textContent = 'Waiting for Pi’s flight plan…'
-    waitingNote.hidden = flight.entry !== undefined
-    return
-  }
-  waitingNote.hidden = true
-  if (!response.ok) return
-
-  const entryText = await response.text()
-  if (entryText === flight.entryText) return
-  flight.entryText = entryText
-  flight.entry = JSON.parse(entryText)
-  showSky()
 }
 
-/** Polls bird.json now and then every POLL_INTERVAL_MS, never overlapping requests. */
-async function keepPolling() {
+/** Runs `poll` now and then every `intervalMs`, never overlapping runs. */
+async function keepPolling(poll, intervalMs) {
   try {
-    await pollBirdEntry()
+    await poll()
   } finally {
-    setTimeout(keepPolling, POLL_INTERVAL_MS)
+    setTimeout(() => keepPolling(poll, intervalMs), intervalMs)
   }
 }
 
@@ -345,8 +324,8 @@ function handleKeyDown(event) {
   undo()
 }
 
-/** Wires up the page and starts watching for bird.json. */
-function start() {
+/** Wires up the page, then opens the canvas until a drawing is saved, or for a redraw at /?draw, and the sky otherwise. */
+async function start() {
   buildSwatches()
   buildSizes()
   canvas.addEventListener('pointerdown', startStroke)
@@ -358,10 +337,12 @@ function start() {
   undoButton.addEventListener('click', undo)
   clearButton.addEventListener('click', clearCanvas)
   saveButton.addEventListener('click', saveBird)
-  toSkyButton.addEventListener('click', showSky)
-  drawAgainButton.addEventListener('click', showDraw)
   document.addEventListener('keydown', handleKeyDown)
-  keepPolling()
+  window.addEventListener('resize', fitStage)
+
+  const wantsToDraw = new URLSearchParams(window.location.search).has('draw')
+  if (wantsToDraw || !(await hasSavedBird())) return showDraw()
+  showSky()
 }
 
 start()
