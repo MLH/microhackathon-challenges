@@ -127,12 +127,12 @@ Finish, so it waits for the gallery answer.
 
 ## 5. Gallery
 
-Only with `publish_gallery_item`; without it, or if you already published
-this bird in this conversation, skip to step 6. Use the display
-name from `session_info` and ask: "Want this on the booth screens? It'll show
-with your name, [display name], and staff can remove it at any time."
+Only with `publish_gallery_item`; without it, or if you already offered
+this bird in this conversation, skip to step 6. Don't ask in chat whether to
+share it: the station asks in its own dialog.
 
-On a yes, run the checker once more, then `read` `bird.json` and call
+Run the checker once more, then `read` `bird.json`. Say what's about to be
+shared, such as "Let's put Pip on the booth screens.", and call
 `publish_gallery_item` with:
 
 - `kind`: `bird`
@@ -141,7 +141,13 @@ On a yes, run the checker once more, then `read` `bird.json` and call
 - `files`: `["bird.png"]`
 - `payload`: exactly the object you just read from `bird.json`
 
-On a no, move on without publishing.
+Word what you say next by its `outcome`:
+
+- `shared`: tell them their bird is on its way to the booth screens.
+- `declined`: they chose Not now and nothing was published. Say that's fine.
+- The call fails: tell them their bird couldn't go on the screens this time.
+
+Then go on to step 6.
 
 ## 6. Finish
 

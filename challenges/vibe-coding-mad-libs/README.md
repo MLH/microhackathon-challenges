@@ -43,11 +43,11 @@ Setup fails if port 4321 is already in use.
 
 ## Gallery payload
 
-After the participant tries their improved app, Pi asks whether to show it on
-the booth screens and, on a yes, runs `screenshot.mjs`, then publishes an item
-with kind `app`, renderer `mad-libs-v1`, and the title `<Theme> about
-<Subject>`. The image is `files[0]`, `screenshot.png`: a 1280x800 PNG of the
-app's first screen in the preview. The payload is:
+After the participant tries their improved app, Pi runs `screenshot.mjs`,
+then offers an item, and the station asks whether to show it on the booth
+screens. The item has kind `app`, renderer `mad-libs-v1`, and the title
+`<Theme> about <Subject>`. The image is `files[0]`, `screenshot.png`: a
+1280x800 PNG of the app's first screen in the preview. The payload is:
 
 ```json
 {
