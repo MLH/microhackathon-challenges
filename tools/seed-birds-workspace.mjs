@@ -43,11 +43,12 @@ function pngChunk(type, data) {
   return Buffer.concat([length, typeAndData, checksum])
 }
 
-/** The RGBA colour of a cartoon red bird facing right at pixel (x, y), transparent off the bird. */
-function birdPixel(x, y) {
-  const inEllipse = (centreX, centreY, radiusX, radiusY) => ((x - centreX) / radiusX) ** 2 + ((y - centreY) / radiusY) ** 2 < 1
+/** The RGBA colour of a cartoon red bird facing right at a pixel, transparent off the bird. */
+function birdPixel(column, row) {
+  /** True when the pixel lies inside the ellipse centred on (centreX, centreY). */
+  const inEllipse = (centreX, centreY, radiusX, radiusY) => ((column - centreX) / radiusX) ** 2 + ((row - centreY) / radiusY) ** 2 < 1
   if (inEllipse(130, 46, 4, 4)) return [30, 30, 30, 255]
-  if (x > 142 && x < 158 && Math.abs(y - 50) < (158 - x) / 3) return [242, 179, 61, 255]
+  if (column > 142 && column < 158 && Math.abs(row - 50) < (158 - column) / 3) return [242, 179, 61, 255]
   if (inEllipse(70, 55, 30, 16)) return [224, 76, 63, 255]
   if (inEllipse(80, 70, 55, 38) || inEllipse(125, 50, 22, 22)) return [255, 107, 91, 255]
 
@@ -57,10 +58,10 @@ function birdPixel(x, y) {
 /** A sample drawing as a transparent PNG. */
 function samplePng() {
   const rows = []
-  for (let y = 0; y < BIRD_HEIGHT; y += 1) {
-    const row = [0]
-    for (let x = 0; x < BIRD_WIDTH; x += 1) row.push(...birdPixel(x, y))
-    rows.push(Buffer.from(row))
+  for (let row = 0; row < BIRD_HEIGHT; row += 1) {
+    const scanline = [0]
+    for (let column = 0; column < BIRD_WIDTH; column += 1) scanline.push(...birdPixel(column, row))
+    rows.push(Buffer.from(scanline))
   }
   const header = Buffer.alloc(13)
   header.writeUInt32BE(BIRD_WIDTH, 0)

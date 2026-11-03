@@ -89,6 +89,7 @@ export function createFlock({ galleryUrl, cacheDirectory }) {
   }
 
   return {
+    /** The flock for /flock.json: the live feed when the gallery gives one, else the practice flock. */
     async feed() {
       const live = galleryUrl === undefined ? undefined : await liveFeed()
       if (live === undefined) return { source: 'demo', items: demoFeed.items }
@@ -96,6 +97,7 @@ export function createFlock({ galleryUrl, cacheDirectory }) {
       return { source: 'live', items: live.items.map(({ image_source: _, ...item }) => item) }
     },
 
+    /** A gallery bird's PNG by its cache key, from the cache or fetched once. */
     async liveImage(key) {
       if (!IMAGE_KEY_PATTERN.test(key)) return undefined
       const cachedImage = readCachedImage(path.join(imageDirectory, `${key}.png`))
@@ -110,6 +112,7 @@ export function createFlock({ galleryUrl, cacheDirectory }) {
       return image
     },
 
+    /** A practice bird's SVG, when `fileName` is one the practice flock lists. */
     demoImage(fileName) {
       return demoFileNames.has(fileName) ? readFileSync(path.join(DEMO_DIRECTORY, fileName)) : undefined
     },

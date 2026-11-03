@@ -17,12 +17,12 @@ const BIRD_BOX_CENTRE = BIRD_BOX_PIXELS / 2
 
 /** The point each waypoint puts the bird's centre at, `{ n, x, y }`, in stage pixels. */
 export function pathPoints(waypoints) {
-  return waypoints.map(({ n, x, y }) => ({ n, x: x + BIRD_BOX_CENTRE, y: y + BIRD_BOX_CENTRE }))
+  return waypoints.map((waypoint) => ({ n: waypoint.n, x: waypoint.x + BIRD_BOX_CENTRE, y: waypoint.y + BIRD_BOX_CENTRE }))
 }
 
 /** SVG path data for straight segments through `points`. */
 export function pathData(points) {
-  return points.map(({ x, y }, index) => `${index === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ')
+  return points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x} ${point.y}`).join(' ')
 }
 
 /**

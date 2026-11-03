@@ -1,9 +1,12 @@
 // Proves the birdsbirdbirds package: check-bird.mjs accepts real gallery
 // birds and rejects CSS that could escape the page's keyframes stylesheet; the
 // page server saves only PNGs to bird.png, records each new checked flight,
-// and sends it as waypoints on the gallery's stage; the setup and cleanup
-// hooks start and stop it; the label never parses HTML; the workspace watcher
-// and its Pi extension report each new drawing once.
+// sends it as waypoints on the gallery's stage, and proxies the booth flock
+// or falls back to the practice flock; the page's pure helpers crop drawings
+// and play flights as the gallery does; the setup and cleanup hooks start and
+// stop the server; the label never parses HTML; the workspace watcher and its
+// Pi extension report each new drawing once; the seed script leaves a
+// workspace that opens on a revision.
 
 import assert from 'node:assert/strict'
 import { execFile, spawn, spawnSync } from 'node:child_process'
@@ -685,7 +688,7 @@ test('the sky eases each keyframe with the flight timing function unless the fra
 })
 
 test('the sky highlights every segment touching a changed waypoint', () => {
-  const waypoints = [1, 2, 3, 4, 5].map((n) => ({ n }))
+  const waypoints = [1, 2, 3, 4, 5].map((number) => ({ n: number }))
 
   const segments = changedSegments(waypoints, [2, 5])
 

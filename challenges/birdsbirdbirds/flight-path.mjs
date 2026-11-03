@@ -101,10 +101,10 @@ function waypointsOf(frames) {
     .map(([offset, frame], index) => waypointOf(index + 1, offset, frame))
 }
 
-/** One waypoint, numbered `n`, from the merged frame at `offset`. */
-function waypointOf(n, offset, frame) {
+/** One waypoint, numbered `number`, from the merged frame at `offset`. */
+function waypointOf(number, offset, frame) {
   const { x, y, rotate, scale } = placementOf(frame.transform)
-  const waypoint = { n, offset: rounded(offset, 4), x: rounded(x, 1), y: rounded(y, 1) }
+  const waypoint = { n: number, offset: rounded(offset, 4), x: rounded(x, 1), y: rounded(y, 1) }
   if (rotate !== undefined) waypoint.rotate = rounded(rotate, 1)
   if (scale !== undefined) waypoint.scale = rounded(scale, 3)
   if (frame.opacity !== undefined) waypoint.opacity = frame.opacity
@@ -137,39 +137,34 @@ function placementOf(transformFunctions) {
 /** The 2D matrix of one checked transform function. */
 function matrixOf(name, transformArguments) {
   const [first, second] = transformArguments
-  const lengths = () => [pixelsOf(first), second === undefined ? 0 : pixelsOf(second)]
-  const scales = () => [clampedScale(first), second === undefined ? clampedScale(first) : clampedScale(second)]
-  const radians = (argument) => (argument === undefined ? 0 : (degreesOf(argument) * Math.PI) / 180)
 
   switch (name) {
     case 'translate':
-    case 'translate3d': {
-      const [x, y] = lengths()
-      return [1, 0, 0, 1, x, y]
-    }
+    case 'translate3d':
+      return [1, 0, 0, 1, pixelsOf(first), second === undefined ? 0 : pixelsOf(second)]
     case 'translateX':
       return [1, 0, 0, 1, pixelsOf(first), 0]
     case 'translateY':
       return [1, 0, 0, 1, 0, pixelsOf(first)]
     case 'rotate':
     case 'rotateZ': {
-      const angle = radians(first)
+      const angle = radiansOf(first)
       return [Math.cos(angle), Math.sin(angle), -Math.sin(angle), Math.cos(angle), 0, 0]
     }
     case 'scale': {
-      const [scaleX, scaleY] = scales()
-      return [scaleX, 0, 0, scaleY, 0, 0]
+      const scaleX = clampedScale(first)
+      return [scaleX, 0, 0, second === undefined ? scaleX : clampedScale(second), 0, 0]
     }
     case 'scaleX':
       return [clampedScale(first), 0, 0, 1, 0, 0]
     case 'scaleY':
       return [1, 0, 0, clampedScale(first), 0, 0]
     case 'skew':
-      return [1, Math.tan(radians(second)), Math.tan(radians(first)), 1, 0, 0]
+      return [1, Math.tan(radiansOf(second)), Math.tan(radiansOf(first)), 1, 0, 0]
     case 'skewX':
-      return [1, 0, Math.tan(radians(first)), 1, 0, 0]
+      return [1, 0, Math.tan(radiansOf(first)), 1, 0, 0]
     case 'skewY':
-      return [1, Math.tan(radians(first)), 0, 1, 0, 0]
+      return [1, Math.tan(radiansOf(first)), 0, 1, 0, 0]
     default:
       throw new Error(`transform ${name}() has no matrix; check the bird with check-bird.mjs first`)
   }
@@ -201,6 +196,11 @@ function pixelsOf({ value, unit }) {
 /** A checked angle in degrees. */
 function degreesOf({ value, unit }) {
   return unit === '' ? 0 : value * DEGREES_PER_UNIT[unit]
+}
+
+/** A checked angle in radians; a missing optional angle is 0. */
+function radiansOf(argument) {
+  return argument === undefined ? 0 : (degreesOf(argument) * Math.PI) / 180
 }
 
 /** A scale factor held to the gallery's limit either way. */

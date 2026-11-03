@@ -33,13 +33,13 @@ function inkBounds(rgba, width, height) {
   let top = height
   let right = 0
   let bottom = 0
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      if (rgba[(y * width + x) * 4 + 3] < INK_ALPHA) continue
-      left = Math.min(left, x)
-      top = Math.min(top, y)
-      right = Math.max(right, x + 1)
-      bottom = Math.max(bottom, y + 1)
+  for (let row = 0; row < height; row += 1) {
+    for (let column = 0; column < width; column += 1) {
+      if (rgba[(row * width + column) * 4 + 3] < INK_ALPHA) continue
+      left = Math.min(left, column)
+      top = Math.min(top, row)
+      right = Math.max(right, column + 1)
+      bottom = Math.max(bottom, row + 1)
     }
   }
 
