@@ -24,6 +24,7 @@ import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } fro
 import birdsbirdbirdsExtension from '../challenges/birdsbirdbirds/extension.mjs'
 import { FLIGHTS_DIRECTORY } from '../challenges/birdsbirdbirds/flight-history.mjs'
 import { changedWaypoints, flightOf } from '../challenges/birdsbirdbirds/flight-path.mjs'
+import { galleryUrlFromEnvironment } from '../challenges/birdsbirdbirds/flock.mjs'
 import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
 import { changedSegments, flightKeyframes, flockStartSeconds } from '../challenges/birdsbirdbirds/page/flight-motion.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
@@ -439,9 +440,9 @@ const onePixelPng = (rgba) => {
 /** A valid 1×1 transparent RGBA PNG. */
 const TINY_PNG = onePixelPng([0, 0, 0, 0])
 
-/** Starts a page server for `workspace` on a free loopback port, closed when the test ends; resolves its port. */
-const startBirdServer = async (testContext, workspace) => {
-  const server = createBirdServer({ workspace, token: SERVER_TOKEN })
+/** Starts a page server for `workspace` on a free loopback port, closed when the test ends; resolves its port. `options` reach createBirdServer. */
+const startBirdServer = async (testContext, workspace, options = {}) => {
+  const server = createBirdServer({ workspace, token: SERVER_TOKEN, ...options })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   testContext.after(() => {
     server.closeAllConnections()
@@ -867,6 +868,150 @@ test('the server does not serve a bird.png over the size cap', (testContext) => 
 
   assert.equal(response.status, 422)
 }))
+
+/** A gallery feed item as the booth API sends it; `overrides` replace only the fields a test is about. */
+const feedItem = (overrides = {}) => ({
+  id: 'item-1',
+  bird_name: 'Robin',
+  origin: 'Durham, NC',
+  display_name: 'Ada',
+  stored_at: '2026-11-03T10:00:00Z',
+  image_url: '/gallery/booth/items/item-1/files/bird.png',
+  keyframes: [
+    { offset: 0, transform: 'translate(-120px, 300px) rotate(5deg)' },
+    { offset: 0.5, transform: 'translate(400px, 200px)', opacity: 0.8, easing: 'ease-in' },
+    { offset: 1, transform: 'translate(1040px, 300px)' },
+  ],
+  duration_s: 42,
+  timing_function: 'ease-in-out',
+  ...overrides,
+})
+
+/**
+ * Starts a loopback stand-in for the booth API that answers `routes`
+ * (path to `{ status, contentType, body }`) and 404 otherwise, closed when
+ * the test ends. Resolves its base URL and the paths it was asked for.
+ */
+const startGalleryStub = async (testContext, routes) => {
+  const requests = []
+  const stub = http.createServer((request, response) => {
+    requests.push(request.url)
+    const route = routes[request.url]
+    if (route === undefined) return response.writeHead(404).end('not found')
+    response.writeHead(route.status ?? 200, { 'content-type': route.contentType ?? 'application/json', 'cross-origin-resource-policy': 'same-origin' })
+    response.end(route.body)
+  })
+  await new Promise((resolve) => stub.listen(0, '127.0.0.1', resolve))
+  testContext.after(() => {
+    stub.closeAllConnections()
+    stub.close()
+  })
+
+  return { url: `http://127.0.0.1:${stub.address().port}/gallery/booth`, requests }
+}
+
+/** Starts a page server whose flock comes from `galleryUrl`, caching in a fresh directory beside `workspace`. */
+const startServerWithGallery = (testContext, { directory, workspace }, galleryUrl) => startBirdServer(testContext, workspace, { galleryUrl, flockCacheDirectory: path.join(directory, 'flock-cache') })
+
+/** GETs /flock.json and resolves the parsed feed. */
+const getFlock = async (port) => JSON.parse((await sendRequest({ port, requestPath: '/flock.json', timeoutMs: 10_000 })).body)
+
+test('the server flies the practice flock, served same-origin, when no gallery URL is set', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+
+  const flock = await getFlock(port)
+
+  assert.equal(flock.source, 'demo')
+  assert.ok(flock.items.length >= 6 && flock.items.length <= 8, `${flock.items.length} practice birds`)
+  const image = await sendRequest({ port, requestPath: flock.items[0].image_url })
+  assert.equal(image.status, 200)
+  assert.equal(image.headers['content-type'], 'image/svg+xml')
+}))
+
+test('the server proxies the gallery feed and its PNGs same-origin, fetching each image once', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const gallery = await startGalleryStub(testContext, {
+    '/gallery/booth/birds.json': { body: JSON.stringify({ items: [feedItem()] }) },
+    '/gallery/booth/items/item-1/files/bird.png': { contentType: 'image/png', body: TINY_PNG },
+  })
+  const port = await startServerWithGallery(testContext, { directory, workspace }, gallery.url)
+
+  const flock = await getFlock(port)
+  const firstImage = await sendRequest({ port, requestPath: flock.items[0].image_url })
+  const secondImage = await sendRequest({ port, requestPath: flock.items[0].image_url })
+
+  assert.equal(flock.source, 'live')
+  const { stored_at: _, ...sentFields } = feedItem()
+  assert.deepEqual(flock.items, [{ ...sentFields, image_url: flock.items[0].image_url }])
+  assert.match(flock.items[0].image_url, /^\/flock\/images\/[0-9a-f]{32}\.png$/)
+  assert.deepEqual(firstImage.body, TINY_PNG)
+  assert.deepEqual(secondImage.body, TINY_PNG)
+  assert.deepEqual(gallery.requests, ['/gallery/booth/birds.json', '/gallery/booth/items/item-1/files/bird.png'])
+}))
+
+test('the server drops feed birds whose transform fails the checker or whose image is on another origin', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const gallery = await startGalleryStub(testContext, {
+    '/gallery/booth/birds.json': {
+      body: JSON.stringify({
+        items: [
+          feedItem({ id: 'url-transform', keyframes: [{ offset: 0, transform: 'url(https://evil.example/x.svg)' }] }),
+          feedItem({ id: 'elsewhere', image_url: '//evil.example/bird.png' }),
+          feedItem({ id: 'kept' }),
+        ],
+      }),
+    },
+  })
+  const port = await startServerWithGallery(testContext, { directory, workspace }, gallery.url)
+
+  const flock = await getFlock(port)
+
+  assert.deepEqual(flock.items.map((item) => item.id), ['kept'])
+}))
+
+const UNAVAILABLE_GALLERIES = [
+  { behavior: 'answers 404', routes: {} },
+  { behavior: 'sends a feed that is not JSON', routes: { '/gallery/booth/birds.json': { body: '<html>' } } },
+]
+
+for (const { behavior, routes } of UNAVAILABLE_GALLERIES) {
+  test(`the server falls back to the practice flock when the gallery ${behavior}`, (testContext) => withWorkspace(async ({ directory, workspace }) => {
+    const gallery = await startGalleryStub(testContext, routes)
+    const port = await startServerWithGallery(testContext, { directory, workspace }, gallery.url)
+
+    const flock = await getFlock(port)
+
+    assert.equal(flock.source, 'demo')
+  }))
+}
+
+test('the server falls back to the practice flock when the gallery is offline', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startServerWithGallery(testContext, { directory, workspace }, `http://127.0.0.1:${await findFreePort()}/gallery/booth`)
+
+  const flock = await getFlock(port)
+
+  assert.equal(flock.source, 'demo')
+}))
+
+test('the server answers 404 for a flock image the feed never named', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+
+  const response = await sendRequest({ port, requestPath: `/flock/images/${'0'.repeat(32)}.png` })
+
+  assert.equal(response.status, 404)
+}))
+
+const GALLERY_URL_SETTINGS = [
+  { behavior: 'prefers BOOTHSTRAP_GALLERY_URL', environment: { BOOTHSTRAP_GALLERY_URL: 'https://api.example/gallery/a', BIRDSBIRDBIRDS_GALLERY_URL: 'https://api.example/gallery/b' }, galleryUrl: 'https://api.example/gallery/a' },
+  { behavior: 'falls back to the event setting BIRDSBIRDBIRDS_GALLERY_URL', environment: { BIRDSBIRDBIRDS_GALLERY_URL: 'https://api.example/gallery/b' }, galleryUrl: 'https://api.example/gallery/b' },
+  { behavior: 'is undefined when neither is set', environment: {}, galleryUrl: undefined },
+]
+
+for (const { behavior, environment, galleryUrl } of GALLERY_URL_SETTINGS) {
+  test(`the gallery URL ${behavior}`, () => {
+    const url = galleryUrlFromEnvironment(environment)
+
+    assert.equal(url, galleryUrl)
+  })
+}
 
 /** Resolves a TCP port that was free a moment ago, by binding port 0 and closing. */
 const findFreePort = () => new Promise((resolve, reject) => {

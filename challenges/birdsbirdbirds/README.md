@@ -17,6 +17,8 @@ published to the booth screens as a `birds-v1` gallery item.
 | `check-bird.mjs` | Checks `bird.json`; `node check-bird.mjs [path]` |
 | `flight-path.mjs` | Turns a checked flight into waypoints on the gallery's stage |
 | `flight-history.mjs` | Records each new passing flight in `.flights/` |
+| `flock.mjs` | Fetches the booth flock for the sky, or falls back to the practice flock |
+| `flock/` | The practice flock: SVG birds and their flights in the feed's shape |
 | `server.mjs` | Local page server on `127.0.0.1:4322` |
 | `workspace-file.mjs` | Reads `bird.json` and `bird.png` only as capped regular files |
 | `setup`, `cleanup` | Start and stop the server (hooks in `hooks/`) |
@@ -80,6 +82,39 @@ in pixels on the gallery's 1000 by 850 stage: 1vw is 10px and 1vh is 8.5px,
 as the gallery converts them, and a translate percentage is a share of the
 120px bird box. `changed` lists the current waypoints whose position or
 transform differs from the previous flight's waypoint of the same number.
+
+## The flock
+
+The other attendees' published birds fly dimmed behind the participant's.
+The page server reads the gallery's URL from `BOOTHSTRAP_GALLERY_URL`, or
+else from `BIRDSBIRDBIRDS_GALLERY_URL`, which an event can set in its
+`challenge_env`. It fetches `<url>/birds.json`:
+
+```json
+{
+  "items": [{
+    "id": "…", "bird_name": "…", "origin": "…", "display_name": "…",
+    "stored_at": "…", "image_url": "/gallery/{slug}/items/{id}/files/bird.png",
+    "keyframes": [{ "offset": 0, "transform": "translate(120px, 300px) rotate(5deg)", "opacity": 1, "easing": "ease-in" }],
+    "duration_s": 42, "timing_function": "ease-in-out"
+  }]
+}
+```
+
+`image_url` is a path on the gallery's origin, transforms are in stage
+pixels, and `duration_s` is one flight's playback time on the stage. Each
+transform and timing function must pass the checker's grammar and is written
+out again; a bird that fails any check, or whose image is on another origin,
+is dropped. The booth API serves its files same-origin only, so the page
+server proxies the feed at `GET /flock.json` and each PNG at
+`GET /flock/images/<key>.png`, keeping copies in
+`$TMPDIR/birdsbirdbirds-flock/` and asking the gallery for the feed again
+after 30 s.
+
+With no URL, or when the gallery is offline, errs, answers 404, or sends no
+valid feed, `/flock.json` sends the practice flock in `flock/` instead, its
+SVGs served at `GET /flock/demo/<name>.svg`. Its `source` field is `live` or
+`demo`, and the page labels the flock to match.
 
 ## Run without boothstrap
 

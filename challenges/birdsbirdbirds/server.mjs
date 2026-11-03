@@ -2,20 +2,23 @@
 // participant's drawing as <workspace>/bird.png and polls /flight.json: the
 // latest flight that passed check-bird.mjs and the one before it, as
 // waypoints on the gallery's sky stage. The page gets numbers only, never
-// bird.json's CSS text.
+// bird.json's CSS text. It also serves the booth flock from /flock.json,
+// fetched by flock.mjs, so every image the page shows is same-origin.
 //
 // Run as `node server.mjs` with BIRDSBIRDBIRDS_WORKSPACE (absolute),
-// BIRDSBIRDBIRDS_TOKEN, and optionally BIRDSBIRDBIRDS_PORT (default 4322).
-// Exits with code 3 when the port is busy.
+// BIRDSBIRDBIRDS_TOKEN, and optionally BIRDSBIRDBIRDS_PORT (default 4322)
+// and a gallery URL (see flock.mjs). Exits with code 3 when the port is busy.
 
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile, rename, rm, writeFile } from 'node:fs/promises'
 import http from 'node:http'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { isRunDirectly } from './check-bird.mjs'
 import { readFlightHistory, recordFlight, watchFlights } from './flight-history.mjs'
+import { createFlock, galleryUrlFromEnvironment } from './flock.mjs'
 import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const DEFAULT_PORT = 4322
@@ -27,6 +30,8 @@ const MAX_DISCARDED_BYTES = 4 * MAX_PNG_BYTES
 
 const LISTEN_HOST = '127.0.0.1'
 const PAGE_DIRECTORY = path.join(path.dirname(fileURLToPath(import.meta.url)), 'page')
+const LIVE_FLOCK_IMAGE_PATTERN = /^\/flock\/images\/([0-9a-f]{32})\.png$/
+const DEMO_FLOCK_IMAGE_PATTERN = /^\/flock\/demo\/([a-z0-9-]{1,40}\.svg)$/
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 const IHDR_CHUNK_TYPE = Buffer.from('IHDR', 'ascii')
 // IEND has no data, so the chunk (length, type, CRC) is always these 12 bytes.
@@ -58,14 +63,17 @@ export function sha256Hex(text) {
  * POST /shutdown. The server is not listening yet; the Host and Origin checks
  * use whatever port it is later bound to, so tests can listen on port 0.
  * While it listens, it records each new passing flight as the workspace
- * changes.
+ * changes. The flock comes from `galleryUrl`, or the practice flock when it
+ * is undefined, with copies kept in `flockCacheDirectory` (default
+ * $TMPDIR/birdsbirdbirds-flock).
  */
-export function createBirdServer({ workspace, token }) {
+export function createBirdServer({ workspace, token, galleryUrl, flockCacheDirectory = path.join(tmpdir(), 'birdsbirdbirds-flock') }) {
   if (!path.isAbsolute(workspace)) throw new Error(`workspace must be an absolute path, got ${JSON.stringify(workspace)}`)
   if (typeof token !== 'string' || token === '') throw new Error('token must be a non-empty string')
 
+  const flock = createFlock({ galleryUrl, cacheDirectory: flockCacheDirectory })
   const server = http.createServer((request, response) => {
-    handleRequest({ server, workspace, token, request, response }).catch((error) => {
+    handleRequest({ server, workspace, token, flock, request, response }).catch((error) => {
       console.error(`birdsbirdbirds server: ${request.method} ${request.url} failed: ${error.message}`)
       if (response.headersSent) return response.destroy()
       sendText(response, 500, 'internal error')
@@ -89,7 +97,7 @@ function recordFlightsWhileListening(server, workspace) {
 }
 
 /** Routes one request after the Host check; paths match exactly, with no normalisation. */
-async function handleRequest({ server, workspace, token, request, response }) {
+async function handleRequest({ server, workspace, token, flock, request, response }) {
   const port = server.address().port
   if (!isOwnHost(request.headers.host, port)) return sendText(response, 421, `wrong host; open http://${LISTEN_HOST}:${port}/`)
 
@@ -101,6 +109,13 @@ async function handleRequest({ server, workspace, token, request, response }) {
   if (route === 'GET /bird.png') return sendSavedBird(response, workspace)
   if (route === 'POST /bird.png') return saveBird({ request, response, workspace, port })
   if (route === 'GET /flight.json') return sendFlights(response, workspace)
+  if (route === 'GET /flock.json') return sendJson(response, 200, await flock.feed())
+  if (request.method === 'GET' && LIVE_FLOCK_IMAGE_PATTERN.test(requestPath)) {
+    return sendImage(response, 'image/png', await flock.liveImage(LIVE_FLOCK_IMAGE_PATTERN.exec(requestPath)[1]))
+  }
+  if (request.method === 'GET' && DEMO_FLOCK_IMAGE_PATTERN.test(requestPath)) {
+    return sendImage(response, 'image/svg+xml', flock.demoImage(DEMO_FLOCK_IMAGE_PATTERN.exec(requestPath)[1]))
+  }
   if (route === 'POST /shutdown') return shutDown({ server, token, request, response })
 
   sendText(response, 404, 'not found')
@@ -241,6 +256,13 @@ async function writeFileAtomically(destination, body) {
   }
 }
 
+/** Sends a flock bird's image, or 404 when there is none. */
+function sendImage(response, contentType, body) {
+  if (body === undefined) return sendText(response, 404, 'no such flock bird')
+
+  send(response, 200, contentType, body)
+}
+
 /** Answers 204 and closes the server when the X-Bird-Token header matches; 403 otherwise. */
 function shutDown({ server, token, request, response }) {
   if (!tokensMatch(request.headers['x-bird-token'], token)) return sendText(response, 403, 'wrong or missing X-Bird-Token')
@@ -297,7 +319,21 @@ function readSettings(environment) {
   if (workspace === undefined || !path.isAbsolute(workspace)) throw new Error('BIRDSBIRDBIRDS_WORKSPACE must be set to an absolute path')
   if (token === undefined || token === '') throw new Error('BIRDSBIRDBIRDS_TOKEN must be set')
 
-  return { workspace, token, port: portFromEnvironment(environment) }
+  return { workspace, token, port: portFromEnvironment(environment), galleryUrl: galleryUrlOrPracticeFlock(environment) }
+}
+
+/**
+ * The gallery URL from the environment, or undefined for the practice flock.
+ * A malformed URL is logged rather than fatal: the flock is decoration, and
+ * the challenge works without it.
+ */
+function galleryUrlOrPracticeFlock(environment) {
+  try {
+    return galleryUrlFromEnvironment(environment)
+  } catch (error) {
+    console.error(`birdsbirdbirds server: ${error.message}; showing the practice flock`)
+    return undefined
+  }
 }
 
 /** Starts the server from the environment; exits 3 when the port is busy and 1 on any other startup failure. */
@@ -311,8 +347,8 @@ export function main(environment) {
     return
   }
 
-  const { workspace, token, port } = settings
-  const server = createBirdServer({ workspace, token })
+  const { workspace, token, port, galleryUrl } = settings
+  const server = createBirdServer({ workspace, token, galleryUrl })
   server.on('error', (error) => {
     if (error.code === 'EADDRINUSE') {
       console.error(`birdsbirdbirds server: port ${port} is busy; stop whatever is using it`)
