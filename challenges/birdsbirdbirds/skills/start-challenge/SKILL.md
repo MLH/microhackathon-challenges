@@ -105,9 +105,9 @@ the current directory with exactly these keys and no others:
   "bird_name": "Pip",
   "origin": "Lisbon, Portugal",
   "animation": {
-    "css_keyframes": "@keyframes fly_pip { 0% { transform: translate(4vw, 60vh) rotate(-10deg); } 25% { transform: translate(24vw, 30vh) rotate(-20deg); } 50% { transform: translate(44vw, 50vh) rotate(10deg); } 75% { transform: translate(64vw, 20vh) rotate(-5deg); } 100% { transform: translate(84vw, 40vh) rotate(0deg); } }",
+    "css_keyframes": "@keyframes fly_pip { 0% { transform: translate(-20vw, 60vh) rotate(-10deg); } 20% { transform: translate(14vw, 30vh) rotate(-20deg); } 45% { transform: translate(40vw, 50vh) rotate(10deg); } 70% { transform: translate(66vw, 20vh) rotate(-5deg); } 100% { transform: translate(120vw, 40vh) rotate(0deg); } }",
     "animation_name": "fly_pip",
-    "duration": "12s",
+    "duration": "8s",
     "timing_function": "ease-in-out"
   }
 }
@@ -120,10 +120,14 @@ said:
   Use at least 5. Give every keyframe a `transform` that starts with
   `translate(...)`, start at `0%`, end at `100%`, and never use one
   percentage twice, so your numbers match the page's.
-- Keep every waypoint in the sky: `translate(X, Y)` with X from 0vw to 86vw
-  and Y from 6vh to 72vh. The sky is 100vw by 100vh and the bird is about
-  12vw wide, so that keeps all of it on screen. Start near the left edge and
-  end near the right unless they ask otherwise: the flight loops.
+- The bird flies in from off screen and out again: waypoint 1 holds it fully
+  off one edge, and the last waypoint fully off an edge, such as
+  `translate(-20vw, 60vh)` to start and `translate(120vw, 40vh)` to end. The
+  sky is 100vw by 100vh and the bird is about 12vw wide, so X of -12vw or
+  less hides it on the left and 100vw or more on the right. Enter from the
+  left and leave on the right unless they ask otherwise.
+- Keep every other waypoint in the sky: `translate(X, Y)` with X from 0vw to
+  86vw and Y from 6vh to 72vh, which keeps all of the bird on screen.
 - Paths are straight lines between waypoints. A curve or loop needs several
   close waypoints around it (4 to 6 make a loop about 8vw across); a spin is
   `rotate(360deg)` from one waypoint to the next.
@@ -134,7 +138,7 @@ said:
   `scale` plain numbers. Only `transform`, `opacity`, and
   `animation-timing-function` go inside the keyframes.
 - `animation_name` starts with `fly_`, is unique, and matches the name after
-  `@keyframes`. `duration` is between 2s and 60s; 8s to 20s reads best, and
+  `@keyframes`. `duration` is between 2s and 60s; 6s to 10s reads best, and
   the sky plays it three times slower.
 
 Then run `node <checker> bird.json` with `bash`. It prints one line per
@@ -180,8 +184,8 @@ step 5 without asking anything more.
 ## 5. Join the flock
 
 Only with `publish_gallery_item`; without it, skip to step 6. Don't ask
-whether to share it: the station shows its own notice, with a button to
-take the bird down.
+whether to share it first: the bird joins the flock at once, and they can
+ask you to take it down.
 
 Run the checker once more, then `read` `bird.json`. Say what's about to
 happen, such as "Sending Pip to the flock.", and call `publish_gallery_item`
@@ -196,14 +200,19 @@ with:
 Word what you say next by its `outcome`:
 
 - `shared`: their bird is flying on the booth screens now; tell them to look
-  for it there.
-- `taken_down`: they took it down from the station's notice, so nothing of
-  theirs is on the screens. Say that's fine, kindly, with no pressure to put
-  it back.
+  for it there. In the same message, say that if they'd rather not share
+  it, they can just say so and you'll take it down. Keep the
+  `gallery_item_id`.
 - `declined`: nothing was published. Say that's fine.
 - The call fails: tell them their bird couldn't join the flock this time.
 
 Then report `join-flock`, whatever the outcome, and go on to step 6.
+
+Whenever they ask you to take their bird down, now or after step 6, call
+`withdraw_gallery_item` with that `gallery_item_id`, without asking them to
+confirm. When it answers `taken_down`, say it's off the booth screens,
+kindly, with no pressure to put it back. If the call fails, tell them to ask
+the booth staff, who can take it down.
 
 ## 6. Finish
 

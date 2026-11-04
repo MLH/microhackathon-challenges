@@ -11,4 +11,4 @@ You will:
 
 Any bird works: realistic, abstract, silly, or a scribble with wings.
 Keep the name and origin family-friendly, because your bird flies on
-the booth screens. You can take it down from the station anytime.
+the booth screens. Ask Pi to take it down anytime.

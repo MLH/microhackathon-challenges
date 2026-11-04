@@ -41,7 +41,8 @@ save with the same content, send nothing. Pi writes `bird.json` and runs the
 checker itself, so `animate` needs no message. Pi counts the files in
 `.flights/` (see Flight history) to report `direct-flight`, and reports
 `join-flock` once `publish_gallery_item` answers, without asking first: the
-station's own notice lets the participant take the bird down.
+participant can ask Pi to take the bird down, which it does with
+`withdraw_gallery_item`.
 
 The server listens on port 4322. Set `BIRDSBIRDBIRDS_PORT` to use another
 port, though the skill and the challenge expect 4322.
@@ -230,4 +231,7 @@ to 100%.
 - Rejected: `url(`, `@import`, a second at-rule, backslash escapes, quotes,
   `<`, comments, `!important`, unbalanced braces, text after the rule, and a
   name without the `fly_` prefix.
+- The flight starts and ends off screen: the first and last waypoints must
+  hold the whole bird box, turned and scaled, off the 1000 by 850 stage, so
+  the bird flies in and out of the sky.
 - The whole `bird.json` is at most 8192 bytes.

@@ -19,8 +19,8 @@ const BIRD_HEIGHT = 130
 
 /** The two flights, in order: the second loops at waypoint 4 and droops at the end. */
 const FLIGHTS = [
-  '0% { transform: translate(4vw, 70vh) rotate(-10deg); } 20% { transform: translate(24vw, 38vh) rotate(-20deg); } 40% { transform: translate(32vw, 18vh) rotate(-30deg); } 55% { transform: translate(48vw, 30vh) rotate(10deg); } 75% { transform: translate(66vw, 12vh) rotate(-5deg); } 100% { transform: translate(84vw, 8vh) rotate(0deg); }',
-  '0% { transform: translate(4vw, 70vh) rotate(-10deg); } 20% { transform: translate(24vw, 38vh) rotate(-20deg); } 40% { transform: translate(32vw, 18vh) rotate(-30deg); } 55% { transform: translate(48vw, 30vh) rotate(10deg); } 75% { transform: translate(66vw, 40vh) rotate(15deg); } 100% { transform: translate(84vw, 50vh) rotate(20deg); }',
+  '0% { transform: translate(-20vw, 70vh) rotate(-10deg); } 20% { transform: translate(24vw, 38vh) rotate(-20deg); } 40% { transform: translate(32vw, 18vh) rotate(-30deg); } 55% { transform: translate(48vw, 30vh) rotate(10deg); } 75% { transform: translate(66vw, 12vh) rotate(-5deg); } 100% { transform: translate(120vw, 8vh) rotate(0deg); }',
+  '0% { transform: translate(-20vw, 70vh) rotate(-10deg); } 20% { transform: translate(24vw, 38vh) rotate(-20deg); } 40% { transform: translate(32vw, 18vh) rotate(-30deg); } 55% { transform: translate(48vw, 30vh) rotate(10deg); } 75% { transform: translate(66vw, 40vh) rotate(15deg); } 100% { transform: translate(120vw, 50vh) rotate(20deg); }',
 ]
 
 /** A bird.json for `keyframes`, as Pi would write it. */

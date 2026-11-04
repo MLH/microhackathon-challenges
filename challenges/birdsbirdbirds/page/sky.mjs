@@ -23,6 +23,9 @@ const MASK_PATH_LENGTH = 1000
 /** How far, in stage pixels, a waypoint may sit from an old one and still count as the same spot. */
 const MOVED_TOLERANCE_PIXELS = 0.5
 
+/** How far in from the stage's edge, in stage pixels, the marker of a waypoint off the stage shows, so its number is seen. */
+const EDGE_INSET_PIXELS = 24
+
 /** How long a waypoint stays lit, as a share of a flight, after the bird passes it. */
 const PASS_GLOW_SHARE = 0.05
 
@@ -185,7 +188,7 @@ function highlightChanges({ current, changed, points, shares, drawMs }) {
 /** Adds a numbered marker per waypoint, each popping in as the path reaches it. Returns the markers. */
 function popInWaypoints({ current, changed, points, shares, drawMs }) {
   const markers = current.waypoints.map((waypoint, index) => {
-    const marker = waypointMarker(waypoint.n, points[index])
+    const marker = waypointMarker(waypoint.n, markerPoint(points, index))
     if (changed.includes(waypoint.n)) marker.classList.add('changed')
     marker.animate(
       [{ transform: 'scale(0)', opacity: 0 }, { transform: 'scale(1.3)', opacity: 1, offset: 0.6 }, { transform: 'scale(1)', opacity: 1 }],
@@ -208,10 +211,12 @@ function markMovedWaypoints({ current, previous }) {
   if (previous === null) return
 
   const currentPoints = pathPoints(current.waypoints)
-  const oldMarkers = pathPoints(previous.waypoints)
-    .filter((point) => !currentPoints.some((now) => Math.hypot(now.x - point.x, now.y - point.y) <= MOVED_TOLERANCE_PIXELS))
-    .map((point) => {
-      const marker = waypointMarker(point.n, point)
+  const previousPoints = pathPoints(previous.waypoints)
+  const oldMarkers = previousPoints
+    .map((point, index) => ({ point, shownAt: markerPoint(previousPoints, index) }))
+    .filter(({ point }) => !currentPoints.some((now) => Math.hypot(now.x - point.x, now.y - point.y) <= MOVED_TOLERANCE_PIXELS))
+    .map(({ point, shownAt }) => {
+      const marker = waypointMarker(point.n, shownAt)
       marker.classList.add('old')
 
       return marker
@@ -228,6 +233,43 @@ function waypointMarker(number, point) {
   marker.style.top = `${point.y}px`
 
   return marker
+}
+
+/**
+ * Where to show the marker of `points[index]`: the point itself on the stage,
+ * or, for the off-screen waypoints a flight enters and leaves by, the spot
+ * just inside the edge where the path to its neighbour comes into view, so
+ * the number sits on the line.
+ */
+function markerPoint(points, index) {
+  const point = points[index]
+  const neighbour = points[index === 0 ? 1 : index - 1]
+  if (isInView(point) || neighbour === undefined || !isInView(neighbour)) return clampedToView(point)
+
+  // The furthest share of the way from the neighbour to the point that stays in view.
+  const share = Math.min(
+    ...[['x', STAGE_WIDTH], ['y', STAGE_HEIGHT]].map(([axis, size]) => {
+      const step = point[axis] - neighbour[axis]
+      if (step === 0) return 1
+      const edge = step > 0 ? size - EDGE_INSET_PIXELS : EDGE_INSET_PIXELS
+
+      return Math.min(1, (edge - neighbour[axis]) / step)
+    }),
+  )
+
+  return { x: neighbour.x + share * (point.x - neighbour.x), y: neighbour.y + share * (point.y - neighbour.y) }
+}
+
+/** True when `point` sits at least EDGE_INSET_PIXELS inside the stage. */
+function isInView({ x, y }) {
+  return x >= EDGE_INSET_PIXELS && x <= STAGE_WIDTH - EDGE_INSET_PIXELS && y >= EDGE_INSET_PIXELS && y <= STAGE_HEIGHT - EDGE_INSET_PIXELS
+}
+
+/** `point` moved to the nearest spot at least EDGE_INSET_PIXELS inside the stage. */
+function clampedToView({ x, y }) {
+  const clamp = (value, size) => Math.min(Math.max(value, EDGE_INSET_PIXELS), size - EDGE_INSET_PIXELS)
+
+  return { x: clamp(x, STAGE_WIDTH), y: clamp(y, STAGE_HEIGHT) }
 }
 
 /** Starts the bird's endless flight, lighting each waypoint marker as the bird passes it. */

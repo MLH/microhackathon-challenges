@@ -12,6 +12,7 @@
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
+import { offScreenErrors } from './flight-path.mjs'
 import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const MAX_BIRD_FILE_BYTES = 8192
@@ -111,8 +112,9 @@ const WHITESPACE = new Set([' ', '\t', '\n', '\r', '\f'])
 class CheckError extends Error {}
 
 /**
- * Checks a parsed bird.json value against the birds-v1 shape.
- * Returns an array of actionable error strings; an empty array means valid.
+ * Checks a parsed bird.json value against the birds-v1 shape, and that its
+ * flight starts and ends off screen. Returns an array of actionable error
+ * strings; an empty array means valid.
  */
 export function checkBird(entry) {
   if (!isPlainObject(entry)) {
@@ -127,7 +129,10 @@ export function checkBird(entry) {
   if (!Object.hasOwn(entry, 'animation')) return [...errors, 'animation is missing; add an "animation" object with css_keyframes, animation_name, duration, timing_function']
   if (!isPlainObject(entry.animation)) return [...errors, 'animation must be an object with css_keyframes, animation_name, duration, timing_function']
 
-  return [...errors, ...animationErrors(entry.animation)]
+  const animationProblems = animationErrors(entry.animation)
+  if (animationProblems.length > 0) return [...errors, ...animationProblems]
+
+  return [...errors, ...offScreenErrors(entry)]
 }
 
 /**

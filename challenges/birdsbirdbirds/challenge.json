@@ -26,7 +26,7 @@
     {
       "id": "animate",
       "title": "Teach it to fly",
-      "hint": "Tell Pi how your bird should fly, like you'd tell a friend.",
+      "hint": "Tell Pi your bird's name, where it's from, and how it should fly.",
       "done_when": "Pi wrote bird.json from the participant's description and it passes check-bird.mjs."
     },
     {
@@ -44,7 +44,6 @@
   ],
   "skip_dialog": ["gallery"],
   "gallery": {
-    "kinds": ["bird"],
-    "notice_title": "Your bird joined the flock"
+    "kinds": ["bird"]
   }
 }

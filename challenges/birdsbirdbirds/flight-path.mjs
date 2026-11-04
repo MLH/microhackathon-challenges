@@ -51,6 +51,37 @@ export function flightOf(entry, version) {
 }
 
 /**
+ * What's wrong with where a checked bird.json `entry` starts and ends: a bird
+ * flies in from off the sky and out again, so its first and last waypoints
+ * must hold all of its box, turned and scaled, off the stage. Empty when both
+ * do.
+ */
+export function offScreenErrors(entry) {
+  const { waypoints } = flightOf(entry, 0)
+  const first = waypoints[0]
+  const last = waypoints.at(-1)
+  const errors = []
+  if (isInSky(first)) {
+    errors.push('waypoint 1 puts the bird in the sky; start it fully off screen, such as translate(-20vw, 50vh)')
+  }
+  if (isInSky(last)) {
+    errors.push(`waypoint ${last.n}, the last, puts the bird in the sky; end it fully off screen, such as translate(120vw, 40vh)`)
+  }
+
+  return errors
+}
+
+/** True when any of the bird box `waypoint` places overlaps the stage. */
+function isInSky({ x, y, rotate = 0, scale = 1 }) {
+  const radians = (rotate * Math.PI) / 180
+  const reach = (BIRD_BOX_PIXELS / 2) * Math.abs(scale) * (Math.abs(Math.cos(radians)) + Math.abs(Math.sin(radians)))
+  const centreX = x + BIRD_BOX_PIXELS / 2
+  const centreY = y + BIRD_BOX_PIXELS / 2
+
+  return centreX + reach > 0 && centreX - reach < STAGE_WIDTH && centreY + reach > 0 && centreY - reach < STAGE_HEIGHT
+}
+
+/**
  * The numbers of the waypoints in `current` that no waypoint of `previous`
  * matches in position and transform, whatever its number: inserting a loop
  * renumbers every waypoint after it, but those that didn't move stay

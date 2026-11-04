@@ -333,6 +333,21 @@ const REJECTED_BIRDS = [
     mentions: /^animation\.timing_function has extra text after "linear"; use one timing function on its own/,
   },
   {
+    behavior: 'rejects a flight that starts in the sky',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(10vw, 50vh); } 100% { transform: translate(120vw, 40vh); } }'),
+    mentions: /^waypoint 1 puts the bird in the sky; start it fully off screen/,
+  },
+  {
+    behavior: 'rejects a flight that ends in the sky, naming its last waypoint',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(-20vw, 50vh); } 50% { transform: translate(40vw, 30vh); } 100% { transform: translate(90vw, 40vh); } }'),
+    mentions: /^waypoint 3, the last, puts the bird in the sky; end it fully off screen/,
+  },
+  {
+    behavior: 'rejects a start that a scaled-up bird still reaches into the sky from',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(-14vw, 50vh) scale(2); } 100% { transform: translate(120vw, 40vh); } }'),
+    mentions: /^waypoint 1 puts the bird in the sky/,
+  },
+  {
     behavior: 'rejects transform arguments missing a comma, naming css_keyframes',
     entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(10vw 40vh); } }'),
     mentions: /^animation\.css_keyframes: transform translate\( arguments must be separated by ","/,
@@ -347,6 +362,12 @@ for (const { behavior, entry, mentions } of REJECTED_BIRDS) {
     assert.match(errors.join('\n'), mentions)
   })
 }
+
+test('accepts a flight that drops in from above and leaves off the bottom', () => {
+  const entry = birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(40vw, -20vh); } 50% { transform: translate(50vw, 40vh); } 100% { transform: translate(60vw, 110vh); } }')
+
+  assert.deepEqual(checkBird(entry), [])
+})
 
 test('names an invisible character in css_keyframes by code point, never printing it', () => {
   const entry = birdWithKeyframes('@keyframes fly_test { 0% { transform: none\u202E; } }')
@@ -759,7 +780,7 @@ test('the server sends no flight before Pi writes bird.json', (testContext) => w
 
 test('the server sends a passing bird.json as waypoints in stage pixels and records it as flight 001', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  await writeBird(workspace, birdFlying(['translate(10vw, 20vh)', 'translate(50vw, 40vh) rotate(-10deg)', 'translate(80vw, 60vh)']))
+  await writeBird(workspace, birdFlying(['translate(-20vw, 20vh)', 'translate(50vw, 40vh) rotate(-10deg)', 'translate(120vw, 60vh)']))
 
   const { flights } = await getFlights(port)
 
@@ -770,9 +791,9 @@ test('the server sends a passing bird.json as waypoints in stage pixels and reco
     duration_s: 12,
     timing_function: 'linear',
     waypoints: [
-      { n: 1, offset: 0, x: 100, y: 170 },
+      { n: 1, offset: 0, x: -200, y: 170 },
       { n: 2, offset: 0.5, x: 500, y: 340, rotate: -10 },
-      { n: 3, offset: 1, x: 800, y: 510 },
+      { n: 3, offset: 1, x: 1200, y: 510 },
     ],
   })
   assert.equal(flights.previous, null)
@@ -781,9 +802,9 @@ test('the server sends a passing bird.json as waypoints in stage pixels and reco
 
 test('the server marks the waypoints a revision moved and keeps the flight before it', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  await writeBird(workspace, birdFlying(['translate(10vw, 20vh)', 'translate(50vw, 40vh)', 'translate(80vw, 60vh)']))
+  await writeBird(workspace, birdFlying(['translate(-20vw, 20vh)', 'translate(50vw, 40vh)', 'translate(120vw, 60vh)']))
   await getFlights(port)
-  await writeBird(workspace, birdFlying(['translate(10vw, 20vh)', 'translate(50vw, 10vh)', 'translate(80vw, 60vh)', 'translate(85vw, 70vh)']))
+  await writeBird(workspace, birdFlying(['translate(-20vw, 20vh)', 'translate(50vw, 10vh)', 'translate(120vw, 60vh)', 'translate(130vw, 70vh)']))
 
   const { flights } = await getFlights(port)
 
