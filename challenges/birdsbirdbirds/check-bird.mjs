@@ -5,11 +5,14 @@
 // css_keyframes goes through a small strict tokenizer and parser that accepts
 // exactly one `@keyframes <animation_name> { ... }` rule built from an
 // allowlist of properties, transform functions, and units, so nothing else
-// can reach the page's stylesheet.
+// can reach the page's stylesheet. The parser also returns what it read, so
+// the page server can turn a checked flight into waypoints and check the
+// booth flock's transforms with the same grammar.
 
 import { realpathSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 
+import { offScreenErrors } from './flight-path.mjs'
 import { readWorkspaceFile, RefusedFileError } from './workspace-file.mjs'
 
 export const MAX_BIRD_FILE_BYTES = 8192
@@ -109,8 +112,9 @@ const WHITESPACE = new Set([' ', '\t', '\n', '\r', '\f'])
 class CheckError extends Error {}
 
 /**
- * Checks a parsed bird.json value against the birds-v1 shape.
- * Returns an array of actionable error strings; an empty array means valid.
+ * Checks a parsed bird.json value against the birds-v1 shape, and that its
+ * flight starts and ends off screen. Returns an array of actionable error
+ * strings; an empty array means valid.
  */
 export function checkBird(entry) {
   if (!isPlainObject(entry)) {
@@ -125,7 +129,10 @@ export function checkBird(entry) {
   if (!Object.hasOwn(entry, 'animation')) return [...errors, 'animation is missing; add an "animation" object with css_keyframes, animation_name, duration, timing_function']
   if (!isPlainObject(entry.animation)) return [...errors, 'animation must be an object with css_keyframes, animation_name, duration, timing_function']
 
-  return [...errors, ...animationErrors(entry.animation)]
+  const animationProblems = animationErrors(entry.animation)
+  if (animationProblems.length > 0) return [...errors, ...animationProblems]
+
+  return [...errors, ...offScreenErrors(entry)]
 }
 
 /**
@@ -292,13 +299,55 @@ function keyframesErrors(css, animationName) {
   if (forbidden.length > 0) return forbidden
 
   try {
-    parseKeyframes(tokenize(css, KEYFRAMES_FIELD), animationName)
+    readKeyframes(css, animationName)
   } catch (error) {
     if (!(error instanceof CheckError)) throw error
     return [error.message]
   }
 
   return []
+}
+
+/**
+ * One keyframe as parsed: `offsets` from 0 to 1 (from is 0, to is 1, 50% is
+ * 0.5), and `declarations`, each `{ property, value }`. A transform's value
+ * is its functions in order, each `{ name, arguments }` with every argument
+ * `{ value, unit }` (`none` is no functions); an opacity's is a number; an
+ * animation-timing-function's is its text, written out again.
+ */
+
+/**
+ * Parses checked css_keyframes named `animationName` into keyframes in the
+ * order written. Throws an Error naming the first problem when it fails the
+ * grammar, so call it on keyframes checkBird has passed.
+ */
+export function readKeyframes(css, animationName) {
+  return parseKeyframes(tokenize(css, KEYFRAMES_FIELD), animationName)
+}
+
+/**
+ * Parses a transform value such as `translate(120px, 300px) rotate(5deg)` with
+ * the keyframes grammar. Returns its functions as a keyframe holds them, or
+ * undefined when the grammar refuses it.
+ */
+export function readTransform(text) {
+  try {
+    return checkTransformValue(tokenize(text, 'transform'))
+  } catch (error) {
+    if (!(error instanceof CheckError)) throw error
+    return undefined
+  }
+}
+
+/** Returns a timing function written out again, or undefined when it isn't a keyword or allowed cubic-bezier(). */
+export function readTimingFunction(text) {
+  if (text.length > MAX_TIMING_FUNCTION_LENGTH) return undefined
+  try {
+    return checkTimingValue(tokenize(text, 'timing function'), 'timing function')
+  } catch (error) {
+    if (!(error instanceof CheckError)) throw error
+    return undefined
+  }
 }
 
 /** Builds a CheckError for css_keyframes with the given detail. */
@@ -439,7 +488,8 @@ function describe(token) {
 
 /**
  * Parses tokens as exactly `@keyframes <animationName> { <frame>+ }` and
- * nothing else. Throws CheckError naming the first problem and its fix.
+ * nothing else, returning the frames. Throws CheckError naming the first
+ * problem and its fix.
  */
 function parseKeyframes(tokens, animationName) {
   checkBraceBalance(tokens)
@@ -472,17 +522,20 @@ function parseKeyframes(tokens, animationName) {
   }
   expect('{', `after "@keyframes ${animationName}"`)
 
-  let frameCount = 0
+  const frames = []
   while (peek()?.type !== '}') {
-    position = parseFrame(tokens, position)
-    frameCount += 1
+    const { frame, next: afterFrame } = parseFrame(tokens, position)
+    frames.push(frame)
+    position = afterFrame
   }
   next()
 
-  if (frameCount === 0) throw keyframesError('the @keyframes block has no frames; add frames such as "0% { ... } 100% { ... }"')
+  if (frames.length === 0) throw keyframesError('the @keyframes block has no frames; add frames such as "0% { ... } 100% { ... }"')
   if (position < tokens.length) {
     throw keyframesError(`found ${describe(peek())} after the closing "}" of @keyframes; every frame must sit inside the one @keyframes block, so remove or move anything after its final "}"`)
   }
+
+  return frames
 }
 
 /** Fails unless every "{" has a matching "}" and none closes early below depth zero. */
@@ -494,11 +547,13 @@ function checkBraceBalance(tokens) {
   }
 }
 
-/** Parses one frame starting at `position`: selectors, then a declaration block. Returns the next position. */
+/** Parses one frame starting at `position`: selectors, then a declaration block. Returns `{ frame, next }`. */
 function parseFrame(tokens, position) {
+  const offsets = []
+  const declarations = []
   let cursor = position
   for (;;) {
-    checkFrameSelector(tokens[cursor])
+    offsets.push(frameOffset(tokens[cursor]))
     cursor += 1
     if (tokens[cursor]?.type !== ',') break
     cursor += 1
@@ -513,21 +568,24 @@ function parseFrame(tokens, position) {
       cursor += 1
       continue
     }
-    cursor = parseDeclaration(tokens, cursor)
+    const { declaration, next } = parseDeclaration(tokens, cursor)
+    declarations.push(declaration)
+    cursor = next
   }
 
-  return cursor + 1
+  return { frame: { offsets, declarations }, next: cursor + 1 }
 }
 
-/** Fails unless the token is `from`, `to`, or a percentage from 0% to 100%. */
-function checkFrameSelector(token) {
-  if (token?.type === 'ident' && (token.value === 'from' || token.value === 'to')) return
-  if (token?.type === 'number' && token.unit === '%' && token.value >= 0 && token.value <= 100) return
+/** The offset from 0 to 1 a frame selector stands for; fails unless it is `from`, `to`, or a percentage from 0% to 100%. */
+function frameOffset(token) {
+  if (token?.type === 'ident' && token.value === 'from') return 0
+  if (token?.type === 'ident' && token.value === 'to') return 1
+  if (token?.type === 'number' && token.unit === '%' && token.value >= 0 && token.value <= 100) return token.value / 100
 
   throw keyframesError(`frame selector ${describe(token)} is not allowed; use from, to, or a percentage from 0% to 100%`)
 }
 
-/** Parses `property: value` starting at `position`; returns the position of the ";" or "}" after it. */
+/** Parses `property: value` starting at `position`; returns `{ declaration, next }`, `next` being the position of the ";" or "}" after it. */
 function parseDeclaration(tokens, position) {
   const property = tokens[position]
   if (property?.type !== 'ident') {
@@ -548,20 +606,25 @@ function parseDeclaration(tokens, position) {
   const value = tokens.slice(position + 2, end)
   if (value.length === 0) throw keyframesError(`${quote(property.value)} has no value; give it one or remove it`)
 
-  if (property.value === 'transform') checkTransformValue(value)
-  if (property.value === 'opacity') checkOpacityValue(value)
-  if (property.value === 'animation-timing-function') checkTimingValue(value, `${KEYFRAMES_FIELD}: animation-timing-function`)
+  const readers = {
+    transform: () => checkTransformValue(value),
+    opacity: () => checkOpacityValue(value),
+    'animation-timing-function': () => checkTimingValue(value, `${KEYFRAMES_FIELD}: animation-timing-function`),
+  }
 
-  return end
+  return { declaration: { property: property.value, value: readers[property.value]() }, next: end }
 }
 
 /**
  * Fails unless the value is `none` or allowed transform functions, each with
- * the right number of arguments in the units its kind takes.
+ * the right number of arguments in the units its kind takes. Returns the
+ * functions, each `{ name, arguments }`; `none` is none.
  */
 function checkTransformValue(value) {
-  if (value.length === 1 && value[0].type === 'ident' && value[0].value === 'none') return
+  if (value.length === 1 && value[0].type === 'ident' && value[0].value === 'none') return []
+  if (value.length === 0) throw keyframesError('transform has no value; give it one or remove it')
 
+  const functions = []
   let position = 0
   while (position < value.length) {
     const transformFunction = value[position]
@@ -577,8 +640,11 @@ function checkTransformValue(value) {
     }
     const call = `${transformFunction.value}(${argumentTokens.map((argument) => argument.text).join(', ')})`
     argumentTokens.forEach((argument, index) => checkArgumentKind(call, argument, kinds[index]))
+    functions.push({ name: transformFunction.value, arguments: argumentTokens.map(({ value: number, unit }) => ({ value: number, unit })) })
     position = next
   }
+
+  return functions
 }
 
 /**
@@ -614,20 +680,25 @@ function readArguments(tokens, position, context) {
   }
 }
 
-/** Fails unless the value is a single unitless number from 0 to 1. */
+/** Fails unless the value is a single unitless number from 0 to 1; returns the number. */
 function checkOpacityValue(value) {
   const [number] = value
   if (value.length !== 1 || number.type !== 'number' || number.unit !== '' || number.value < 0 || number.value > 1) {
     throw keyframesError(`opacity must be one plain number from 0 to 1, like "opacity: 0.5"; found ${value.map(describe).join(' ')}`)
   }
+
+  return number.value
 }
 
-/** Fails unless the tokens are a timing keyword or cubic-bezier with four plain numbers, x values in 0–1. */
+/**
+ * Fails unless the tokens are a timing keyword or cubic-bezier with four
+ * plain numbers, x values in 0–1. Returns the timing function written out again.
+ */
 function checkTimingValue(value, field) {
   const allowed = `use ${TIMING_KEYWORDS.join(', ')}, or cubic-bezier(x1, y1, x2, y2) with plain numbers`
   const [first] = value
   if (first?.type === 'ident' && TIMING_KEYWORDS.includes(first.value)) {
-    if (value.length === 1) return
+    if (value.length === 1) return first.value
     throw new CheckError(`${field} has extra text after ${describe(first)}; use one timing function on its own`)
   }
   if (first?.type !== 'function' || first.value !== 'cubic-bezier') {
@@ -649,6 +720,8 @@ function checkTimingValue(value, field) {
   if ([argumentTokens[0], argumentTokens[2]].some((argument) => argument.value < 0 || argument.value > 1)) {
     throw new CheckError(`${field} cubic-bezier() x values (the 1st and 3rd numbers) must be from 0 to 1`)
   }
+
+  return `cubic-bezier(${argumentTokens.map((argument) => argument.value).join(', ')})`
 }
 
 /**

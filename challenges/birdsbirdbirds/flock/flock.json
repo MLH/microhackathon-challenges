@@ -1,0 +1,228 @@
+{
+  "items": [
+    {
+      "id": "demo-pigeon",
+      "bird_name": "Pigeon Pete",
+      "origin": "Brooklyn",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/pigeon.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 120px) rotate(-4deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 80px) rotate(3deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 140px) rotate(-3deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 95px) rotate(4deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 125px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 14,
+      "timing_function": "ease-in-out"
+    },
+    {
+      "id": "demo-heron",
+      "bird_name": "Hazel",
+      "origin": "Edinburgh",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/heron.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 50px) rotate(-2deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 70px) rotate(2deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 40px) rotate(-2deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 75px) rotate(2deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 55px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 18,
+      "timing_function": "linear"
+    },
+    {
+      "id": "demo-sparrow",
+      "bird_name": "Pip",
+      "origin": "Lisbon",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/sparrow.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 300px) rotate(-8deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 250px) rotate(6deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 320px) rotate(-6deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 260px) rotate(8deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 300px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 12,
+      "timing_function": "ease-in-out"
+    },
+    {
+      "id": "demo-duck",
+      "bird_name": "Dolores",
+      "origin": "Austin",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/duck.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 560px) rotate(-3deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 530px) rotate(3deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 580px) rotate(-3deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 540px) rotate(3deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 560px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 16,
+      "timing_function": "linear"
+    },
+    {
+      "id": "demo-toucan",
+      "bird_name": "Tico",
+      "origin": "San José",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/toucan.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 420px) rotate(-5deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 370px) rotate(5deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 450px) rotate(-5deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 380px) rotate(5deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 430px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 15,
+      "timing_function": "ease-in-out"
+    },
+    {
+      "id": "demo-owl",
+      "bird_name": "Professor Hoot",
+      "origin": "Oslo",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/owl.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 210px) rotate(-2deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 190px) rotate(2deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 230px) rotate(-2deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 200px) rotate(2deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 215px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 20,
+      "timing_function": "linear"
+    },
+    {
+      "id": "demo-parrot",
+      "bird_name": "Rio",
+      "origin": "Taipei",
+      "display_name": "MLH",
+      "stored_at": "2026-11-01T12:00:00Z",
+      "image_url": "demo/parrot.svg",
+      "keyframes": [
+        {
+          "offset": 0.0,
+          "transform": "translate(-140px, 480px) rotate(-12deg)"
+        },
+        {
+          "offset": 0.25,
+          "transform": "translate(155px, 330px) rotate(14deg)"
+        },
+        {
+          "offset": 0.5,
+          "transform": "translate(450px, 520px) rotate(-10deg)"
+        },
+        {
+          "offset": 0.75,
+          "transform": "translate(745px, 350px) rotate(12deg)"
+        },
+        {
+          "offset": 1.0,
+          "transform": "translate(1040px, 470px) rotate(0deg)"
+        }
+      ],
+      "duration_s": 13,
+      "timing_function": "ease-in-out"
+    }
+  ]
+}

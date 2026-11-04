@@ -1,8 +1,12 @@
 // Proves the birdsbirdbirds package: check-bird.mjs accepts real gallery
 // birds and rejects CSS that could escape the page's keyframes stylesheet; the
-// page server saves only PNGs to bird.png and serves only checked birds; the
-// setup and cleanup hooks start and stop it; the label never parses HTML; the
-// workspace watcher and its Pi extension report each new drawing once.
+// page server saves only PNGs to bird.png, records each new checked flight,
+// sends it as waypoints on the gallery's stage, and proxies the booth flock
+// or falls back to the practice flock; the page's pure helpers crop drawings
+// and play flights as the gallery does; the setup and cleanup hooks start and
+// stop the server; the label never parses HTML; the workspace watcher and its
+// Pi extension report each new drawing once; the seed script leaves a
+// workspace that opens on a revision.
 
 import assert from 'node:assert/strict'
 import { execFile, spawn, spawnSync } from 'node:child_process'
@@ -14,13 +18,19 @@ import net from 'node:net'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
+import { setTimeout as sleep } from 'node:timers/promises'
 import { fileURLToPath } from 'node:url'
 import { crc32, deflateSync } from 'node:zlib'
 
 import { DEFAULT_DEBOUNCE_MS, watchWorkspace } from '../challenges/birdsbirdbirds/bird-watcher.mjs'
 import { checkBird, loadBirdFile, MAX_BIRD_FILE_BYTES, MAX_KEYFRAMES_BYTES } from '../challenges/birdsbirdbirds/check-bird.mjs'
 import birdsbirdbirdsExtension from '../challenges/birdsbirdbirds/extension.mjs'
+import { FLIGHTS_DIRECTORY, readFlightHistory } from '../challenges/birdsbirdbirds/flight-history.mjs'
+import { changedWaypoints, flightOf } from '../challenges/birdsbirdbirds/flight-path.mjs'
+import { galleryUrlFromEnvironment } from '../challenges/birdsbirdbirds/flock.mjs'
 import { createBirdLabel } from '../challenges/birdsbirdbirds/page/bird-label.mjs'
+import { cropOf } from '../challenges/birdsbirdbirds/page/trim.mjs'
+import { changedSegments, flightKeyframes, flockStartSeconds, playbackMilliseconds } from '../challenges/birdsbirdbirds/page/flight-motion.mjs'
 import { createBirdServer, MAX_PNG_BYTES } from '../challenges/birdsbirdbirds/server.mjs'
 
 const testDirectory = path.dirname(fileURLToPath(import.meta.url))
@@ -323,6 +333,21 @@ const REJECTED_BIRDS = [
     mentions: /^animation\.timing_function has extra text after "linear"; use one timing function on its own/,
   },
   {
+    behavior: 'rejects a flight that starts in the sky',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(10vw, 50vh); } 100% { transform: translate(120vw, 40vh); } }'),
+    mentions: /^waypoint 1 puts the bird in the sky; start it fully off screen/,
+  },
+  {
+    behavior: 'rejects a flight that ends in the sky, naming its last waypoint',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(-20vw, 50vh); } 50% { transform: translate(40vw, 30vh); } 100% { transform: translate(90vw, 40vh); } }'),
+    mentions: /^waypoint 3, the last, puts the bird in the sky; end it fully off screen/,
+  },
+  {
+    behavior: 'rejects a start that a scaled-up bird still reaches into the sky from',
+    entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(-14vw, 50vh) scale(2); } 100% { transform: translate(120vw, 40vh); } }'),
+    mentions: /^waypoint 1 puts the bird in the sky/,
+  },
+  {
     behavior: 'rejects transform arguments missing a comma, naming css_keyframes',
     entry: birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(10vw 40vh); } }'),
     mentions: /^animation\.css_keyframes: transform translate\( arguments must be separated by ","/,
@@ -337,6 +362,12 @@ for (const { behavior, entry, mentions } of REJECTED_BIRDS) {
     assert.match(errors.join('\n'), mentions)
   })
 }
+
+test('accepts a flight that drops in from above and leaves off the bottom', () => {
+  const entry = birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(40vw, -20vh); } 50% { transform: translate(50vw, 40vh); } 100% { transform: translate(60vw, 110vh); } }')
+
+  assert.deepEqual(checkBird(entry), [])
+})
 
 test('names an invisible character in css_keyframes by code point, never printing it', () => {
   const entry = birdWithKeyframes('@keyframes fly_test { 0% { transform: none\u202E; } }')
@@ -434,9 +465,9 @@ const onePixelPng = (rgba) => {
 /** A valid 1×1 transparent RGBA PNG. */
 const TINY_PNG = onePixelPng([0, 0, 0, 0])
 
-/** Starts a page server for `workspace` on a free loopback port, closed when the test ends; resolves its port. */
-const startBirdServer = async (testContext, workspace) => {
-  const server = createBirdServer({ workspace, token: SERVER_TOKEN })
+/** Starts a page server for `workspace` on a free loopback port, closed when the test ends; resolves its port. `options` reach createBirdServer. */
+const startBirdServer = async (testContext, workspace, options = {}) => {
+  const server = createBirdServer({ workspace, token: SERVER_TOKEN, ...options })
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
   testContext.after(() => {
     server.closeAllConnections()
@@ -611,55 +642,220 @@ test('the server sends the page with a CSP that admits no inline styles and no b
   assert.doesNotMatch(response.body.toString(), /<style|style=/)
 }))
 
-test('the server answers 404 for bird.json before Pi writes it', (testContext) => withWorkspace(async ({ workspace }) => {
+/** GETs /flight.json and resolves its status and parsed body. */
+const getFlights = async (port) => {
+  const response = await sendRequest({ port, requestPath: '/flight.json', timeoutMs: 5000 })
+
+  return { status: response.status, text: response.body.toString(), flights: JSON.parse(response.body) }
+}
+
+/** Writes `entry` to the workspace's bird.json, as Pi's write tool does. */
+const writeBird = (workspace, entry) => writeFile(path.join(workspace, 'bird.json'), JSON.stringify(entry))
+
+/** Builds a bird whose css_keyframes is one frame per `transforms` entry, spread evenly from 0% to 100%. */
+const birdFlying = (transforms) => birdWithKeyframes(`@keyframes fly_test { ${transforms.map((transform, index) => `${(index * 100) / (transforms.length - 1)}% { transform: ${transform}; }`).join(' ')} }`)
+
+const FLIGHT_PATHS = [
+  {
+    behavior: 'converts vw, vh, px, em, and % to stage pixels',
+    keyframes: '0% { transform: translate(10vw, 10vh); } 50% { transform: translate(100px, 2em); } 100% { transform: translate(50%, 0); }',
+    waypoints: [{ n: 1, offset: 0, x: 100, y: 85 }, { n: 2, offset: 0.5, x: 100, y: 32 }, { n: 3, offset: 1, x: 60, y: 0 }],
+  },
+  {
+    behavior: 'adds untransformed waypoints where CSS starts and ends a flight that sets none there',
+    keyframes: '50% { transform: translateY(20vh); }',
+    waypoints: [{ n: 1, offset: 0, x: 0, y: 0 }, { n: 2, offset: 0.5, x: 0, y: 170 }, { n: 3, offset: 1, x: 0, y: 0 }],
+  },
+  {
+    behavior: 'merges frames that share an offset, the later declaration winning, and keeps opacity and easing',
+    keyframes: 'from, to { transform: translateX(10vw); } to { transform: translateX(20vw); opacity: 0.5; animation-timing-function: ease-out; }',
+    waypoints: [{ n: 1, offset: 0, x: 100, y: 0 }, { n: 2, offset: 1, x: 200, y: 0, opacity: 0.5, easing: 'ease-out' }],
+  },
+  {
+    behavior: 'adds up full turns and moves a box rotated before it is translated along the turned axis',
+    keyframes: 'from { transform: rotate(1turn); } to { transform: rotate(90deg) translateX(10vw) scale(9); }',
+    waypoints: [{ n: 1, offset: 0, x: 0, y: 0, rotate: 360 }, { n: 2, offset: 1, x: 0, y: 100, rotate: 90, scale: 5 }],
+  },
+]
+
+for (const { behavior, keyframes, waypoints } of FLIGHT_PATHS) {
+  test(`the flight path ${behavior}`, () => {
+    const entry = birdWithKeyframes(`@keyframes fly_test { ${keyframes} }`)
+
+    const flight = flightOf(entry, 1)
+
+    assert.deepEqual(flight.waypoints, waypoints)
+  })
+}
+
+test('a first flight has no changed waypoints, since nothing was revised', () => {
+  const flight = flightOf(birdEntry(), 1)
+
+  const changed = changedWaypoints(flight, undefined)
+
+  assert.deepEqual(changed, [])
+})
+
+test('the sky eases each keyframe with the flight timing function unless the frame sets its own, as CSS does', () => {
+  const flight = flightOf(birdWithKeyframes('@keyframes fly_test { 0% { transform: translate(0, 10vh); } 50% { transform: translate(50vw, 0) rotate(5deg) scale(2); opacity: 0.5; animation-timing-function: ease-in; } 100% { transform: translate(90vw, 0); } }'), 1)
+
+  const keyframes = flightKeyframes(flight)
+
+  assert.deepEqual(keyframes, [
+    { offset: 0, transform: 'translate(0px, 85px) rotate(0deg) scale(1)', easing: 'linear' },
+    { offset: 0.5, transform: 'translate(500px, 0px) rotate(5deg) scale(2)', easing: 'ease-in', opacity: 0.5 },
+    { offset: 1, transform: 'translate(900px, 0px) rotate(0deg) scale(1)', easing: 'linear' },
+  ])
+})
+
+test('the sky highlights every segment touching a changed waypoint', () => {
+  const waypoints = [1, 2, 3, 4, 5].map((number) => ({ n: number }))
+
+  const segments = changedSegments(waypoints, [2, 5])
+
+  assert.deepEqual(segments, [{ from: 0, to: 1 }, { from: 1, to: 2 }, { from: 3, to: 4 }])
+})
+
+/** RGBA pixels for a `width` × `height` image, transparent except opaque pixels at each `[x, y]` in `inked`. */
+const pixelsWithInk = (width, height, inked) => {
+  const rgba = new Uint8ClampedArray(width * height * 4)
+  for (const [x, y] of inked) rgba[(y * width + x) * 4 + 3] = 255
+
+  return rgba
+}
+
+test('a drawing crops to its ink plus 6% of the ink\'s longer side on every edge', () => {
+  const rgba = pixelsWithInk(512, 512, [[200, 100], [299, 149]])
+
+  const crop = cropOf(rgba, 512, 512)
+
+  assert.deepEqual(crop, { x: 194, y: 94, width: 112, height: 62 })
+})
+
+test('a drawing crop stays inside the canvas when the ink touches its edge', () => {
+  const rgba = pixelsWithInk(100, 100, [[0, 0], [49, 99]])
+
+  const crop = cropOf(rgba, 100, 100)
+
+  assert.deepEqual(crop, { x: 0, y: 0, width: 56, height: 100 })
+})
+
+test('a drawing crop ignores faint anti-aliasing noise and is undefined with no ink', () => {
+  const rgba = new Uint8ClampedArray(4 * 4 * 4).fill(8)
+
+  const crop = cropOf(rgba, 4, 4)
+
+  assert.equal(crop, undefined)
+})
+
+test('the sky plays a stated duration three times slower, as the gallery does', () => {
+  const milliseconds = playbackMilliseconds(12)
+
+  assert.equal(milliseconds, 36_000)
+})
+
+test('the sky staggers flock birds 2.3 seconds apart within one slowed flight, as the gallery does', () => {
+  const starts = [0, 1, 2, 30].map((position) => flockStartSeconds(position, 10))
+
+  assert.deepEqual(starts.map((seconds) => Number(seconds.toFixed(2))), [0, 2.3, 4.6, 9])
+})
+
+test('inserting a loop marks only the new waypoints, not the unchanged ones it renumbers', () => {
+  const before = flightOf(birdFlying(['translate(5vw, 60vh)', 'translate(25vw, 40vh)', 'translate(45vw, 50vh)', 'translate(65vw, 30vh)', 'translate(85vw, 40vh)']), 1)
+  const after = flightOf(birdFlying(['translate(5vw, 60vh)', 'translate(25vw, 40vh)', 'translate(45vw, 50vh)', 'translate(50vw, 40vh)', 'translate(45vw, 30vh)', 'translate(40vw, 40vh)', 'translate(65vw, 30vh)', 'translate(85vw, 40vh)']), 2)
+
+  const changed = changedWaypoints(after, before)
+
+  assert.deepEqual(changed, [4, 5, 6])
+})
+
+test('the server sends no flight before Pi writes bird.json', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { status, flights } = await getFlights(port)
 
-  assert.equal(response.status, 404)
+  assert.equal(status, 200)
+  assert.deepEqual(flights, { current: null, previous: null, changed: [] })
 }))
 
-test('the server serves a bird.json that passes the checker', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server sends a passing bird.json as waypoints in stage pixels and records it as flight 001', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(GALLERY_BIRDS[0]))
+  await writeBird(workspace, birdFlying(['translate(-20vw, 20vh)', 'translate(50vw, 40vh) rotate(-10deg)', 'translate(120vw, 60vh)']))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 200)
-  assert.deepEqual(JSON.parse(response.body), GALLERY_BIRDS[0])
+  assert.deepEqual(flights.current, {
+    version: 1,
+    bird_name: 'Robin',
+    origin: 'Durham, NC',
+    duration_s: 12,
+    timing_function: 'linear',
+    waypoints: [
+      { n: 1, offset: 0, x: -200, y: 170 },
+      { n: 2, offset: 0.5, x: 500, y: 340, rotate: -10 },
+      { n: 3, offset: 1, x: 1200, y: 510 },
+    ],
+  })
+  assert.equal(flights.previous, null)
+  assert.deepEqual(await readdir(path.join(workspace, FLIGHTS_DIRECTORY)), ['001.json'])
 }))
 
-test('the server answers 422 for a failing bird.json and never serves its keyframes', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server marks the waypoints a revision moved and keeps the flight before it', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
-  const keyframes = '@keyframes fly_test { 0% { transform: url(https://evil.example/x.svg); } }'
-  await writeFile(path.join(workspace, 'bird.json'), JSON.stringify(birdWithKeyframes(keyframes)))
+  await writeBird(workspace, birdFlying(['translate(-20vw, 20vh)', 'translate(50vw, 40vh)', 'translate(120vw, 60vh)']))
+  await getFlights(port)
+  await writeBird(workspace, birdFlying(['translate(-20vw, 20vh)', 'translate(50vw, 10vh)', 'translate(120vw, 60vh)', 'translate(130vw, 70vh)']))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
-  assert.ok(!response.body.toString().includes('evil.example'))
-  assert.match(JSON.parse(response.body).errors.join('\n'), /"url\(" is not allowed/)
+  assert.equal(flights.current.version, 2)
+  assert.equal(flights.previous.version, 1)
+  assert.deepEqual(flights.changed, [2, 4])
+  assert.deepEqual(await readdir(path.join(workspace, FLIGHTS_DIRECTORY)), ['001.json', '002.json'])
 }))
 
-test('the server answers 422 for a bird.json over the byte cap', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server records a rewrite of the same flight only once, whatever its key order', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const { bird_name: birdName, origin, animation } = birdEntry()
+  await writeBird(workspace, { bird_name: birdName, origin, animation })
+  await getFlights(port)
+  await writeBird(workspace, { animation, origin, bird_name: birdName })
+
+  const { flights } = await getFlights(port)
+
+  assert.equal(flights.current.version, 1)
+  assert.deepEqual(await readdir(path.join(workspace, FLIGHTS_DIRECTORY)), ['001.json'])
+}))
+
+test('the server records a new passing flight as the workspace changes, without the page asking', (testContext) => withWorkspace(async ({ workspace }) => {
+  await startBirdServer(testContext, workspace)
+  const flightFile = path.join(workspace, FLIGHTS_DIRECTORY, '001.json')
+
+  await writeBird(workspace, birdEntry())
+
+  const deadline = Date.now() + 3_000
+  while (!fs.existsSync(flightFile) && Date.now() < deadline) await sleep(50)
+  assert.deepEqual(JSON.parse(await readFile(flightFile, 'utf8')), birdEntry())
+}))
+
+test('the server never records or sends a failing bird.json, nor any of its text', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  await writeBird(workspace, birdWithKeyframes('@keyframes fly_test { 0% { transform: url(https://evil.example/x.svg); } }'))
+
+  const { flights, text } = await getFlights(port)
+
+  assert.equal(flights.current, null)
+  assert.ok(!text.includes('evil.example'))
+  assert.equal(fs.existsSync(path.join(workspace, FLIGHTS_DIRECTORY)), false)
+}))
+
+test('the server sends no flight for a bird.json over the byte cap', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startBirdServer(testContext, workspace)
   await writeFile(path.join(workspace, 'bird.json'), ' '.repeat(MAX_BIRD_FILE_BYTES + 1))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
-}))
-
-test('the server refuses a symlinked bird.json without echoing its target', (testContext) => withWorkspace(async ({ directory, workspace }) => {
-  const port = await startBirdServer(testContext, workspace)
-  const target = path.join(directory, 'secret.txt')
-  await writeFile(target, 'top-secret-line')
-  await symlink(target, path.join(workspace, 'bird.json'))
-
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
-
-  assert.equal(response.status, 422)
-  assert.ok(!response.body.toString().includes('top-secret'), response.body.toString())
+  assert.equal(flights.current, null)
 }))
 
 test('the server refuses a symlinked bird.json even when its target is a valid bird', (testContext) => withWorkspace(async ({ directory, workspace }) => {
@@ -668,10 +864,22 @@ test('the server refuses a symlinked bird.json even when its target is a valid b
   await writeFile(target, JSON.stringify(GALLERY_BIRDS[0]))
   await symlink(target, path.join(workspace, 'bird.json'))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json' })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
-  assert.match(JSON.parse(response.body).errors.join('\n'), /bird.json is not a regular file/)
+  assert.equal(flights.current, null)
+}))
+
+test('the server refuses to record flights into a symlinked .flights directory', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+  const elsewhere = path.join(directory, 'elsewhere')
+  await mkdir(elsewhere)
+  await symlink(elsewhere, path.join(workspace, FLIGHTS_DIRECTORY))
+  await writeBird(workspace, birdEntry())
+
+  const response = await sendRequest({ port, requestPath: '/flight.json' })
+
+  assert.equal(response.status, 500)
+  assert.deepEqual(await readdir(elsewhere), [])
 }))
 
 /**
@@ -733,6 +941,164 @@ test('the server does not serve a bird.png over the size cap', (testContext) => 
   assert.equal(response.status, 422)
 }))
 
+/** A gallery feed item as the booth API sends it; `overrides` replace only the fields a test is about. */
+const feedItem = (overrides = {}) => ({
+  id: 'item-1',
+  bird_name: 'Robin',
+  origin: 'Durham, NC',
+  display_name: 'Ada',
+  stored_at: '2026-11-03T10:00:00Z',
+  image_url: '/gallery/booth/items/item-1/files/bird.png',
+  keyframes: [
+    { offset: 0, transform: 'translate(-120px, 300px) rotate(5deg)' },
+    { offset: 0.5, transform: 'translate(400px, 200px)', opacity: 0.8, easing: 'ease-in' },
+    { offset: 1, transform: 'translate(1040px, 300px)' },
+  ],
+  duration_s: 14,
+  timing_function: 'ease-in-out',
+  ...overrides,
+})
+
+/**
+ * Starts a loopback stand-in for the booth API that answers `routes`
+ * (path to `{ status, contentType, body }`) and 404 otherwise, closed when
+ * the test ends. Resolves its base URL and the paths it was asked for.
+ */
+const startGalleryStub = async (testContext, routes) => {
+  const requests = []
+  const stub = http.createServer((request, response) => {
+    requests.push(request.url)
+    const route = routes[request.url]
+    if (route === undefined) return response.writeHead(404).end('not found')
+    response.writeHead(route.status ?? 200, { 'content-type': route.contentType ?? 'application/json', 'cross-origin-resource-policy': 'same-origin' })
+    response.end(route.body)
+  })
+  await new Promise((resolve) => stub.listen(0, '127.0.0.1', resolve))
+  testContext.after(() => {
+    stub.closeAllConnections()
+    stub.close()
+  })
+
+  return { url: `http://127.0.0.1:${stub.address().port}/gallery/booth`, requests }
+}
+
+/** Starts a page server whose flock comes from `galleryUrl`, caching in a fresh directory beside `workspace`. */
+const startServerWithGallery = (testContext, { directory, workspace }, galleryUrl) => startBirdServer(testContext, workspace, { galleryUrl, flockCacheDirectory: path.join(directory, 'flock-cache') })
+
+/** GETs /flock.json and resolves the parsed feed. */
+const getFlock = async (port) => JSON.parse((await sendRequest({ port, requestPath: '/flock.json', timeoutMs: 10_000 })).body)
+
+test('the server flies the practice flock, served same-origin, when no gallery URL is set', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+
+  const flock = await getFlock(port)
+
+  assert.equal(flock.source, 'demo')
+  assert.ok(flock.items.length >= 6 && flock.items.length <= 8, `${flock.items.length} practice birds`)
+  const image = await sendRequest({ port, requestPath: flock.items[0].image_url })
+  assert.equal(image.status, 200)
+  assert.equal(image.headers['content-type'], 'image/svg+xml')
+}))
+
+test('the server proxies the gallery feed and its PNGs same-origin, fetching each image once', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const gallery = await startGalleryStub(testContext, {
+    '/gallery/booth/birds.json': { body: JSON.stringify({ items: [feedItem()] }) },
+    '/gallery/booth/items/item-1/files/bird.png': { contentType: 'image/png', body: TINY_PNG },
+  })
+  const port = await startServerWithGallery(testContext, { directory, workspace }, gallery.url)
+
+  const flock = await getFlock(port)
+  const firstImage = await sendRequest({ port, requestPath: flock.items[0].image_url })
+  const secondImage = await sendRequest({ port, requestPath: flock.items[0].image_url })
+
+  assert.equal(flock.source, 'live')
+  const { stored_at: _, ...sentFields } = feedItem()
+  assert.deepEqual(flock.items, [{ ...sentFields, image_url: flock.items[0].image_url }])
+  assert.match(flock.items[0].image_url, /^\/flock\/images\/[0-9a-f]{32}\.png$/)
+  assert.deepEqual(firstImage.body, TINY_PNG)
+  assert.deepEqual(secondImage.body, TINY_PNG)
+  assert.deepEqual(gallery.requests, ['/gallery/booth/birds.json', '/gallery/booth/items/item-1/files/bird.png'])
+}))
+
+test('the server drops feed birds whose transform fails the checker, whose image is on another origin, or whose stated duration is out of range', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const gallery = await startGalleryStub(testContext, {
+    '/gallery/booth/birds.json': {
+      body: JSON.stringify({
+        items: [
+          feedItem({ id: 'url-transform', keyframes: [{ offset: 0, transform: 'url(https://evil.example/x.svg)' }] }),
+          feedItem({ id: 'elsewhere', image_url: '//evil.example/bird.png' }),
+          feedItem({ id: 'already-slowed', duration_s: 126 }),
+          feedItem({ id: 'kept' }),
+        ],
+      }),
+    },
+  })
+  const port = await startServerWithGallery(testContext, { directory, workspace }, gallery.url)
+
+  const flock = await getFlock(port)
+
+  assert.deepEqual(flock.items.map((item) => item.id), ['kept'])
+}))
+
+test('the seed script leaves a workspace whose sky opens on a revision', () => withTemporaryDirectory(async (directory) => {
+  const workspace = path.join(directory, 'workspace')
+
+  const result = spawnSync(process.execPath, [path.join(testDirectory, '..', 'tools', 'seed-birds-workspace.mjs'), workspace], { encoding: 'utf8', timeout: 10_000 })
+
+  assert.equal(result.status, 0, result.stderr)
+  const { current, previous, changed } = readFlightHistory(workspace)
+  assert.equal(current.version, 2)
+  assert.equal(previous.version, 1)
+  assert.ok(changed.length > 0)
+  assert.ok(fs.existsSync(path.join(workspace, 'bird.png')))
+}))
+
+const UNAVAILABLE_GALLERIES = [
+  { behavior: 'answers 404', routes: {} },
+  { behavior: 'sends a feed that is not JSON', routes: { '/gallery/booth/birds.json': { body: '<html>' } } },
+]
+
+for (const { behavior, routes } of UNAVAILABLE_GALLERIES) {
+  test(`the server falls back to the practice flock when the gallery ${behavior}`, (testContext) => withWorkspace(async ({ directory, workspace }) => {
+    const gallery = await startGalleryStub(testContext, routes)
+    const port = await startServerWithGallery(testContext, { directory, workspace }, gallery.url)
+
+    const flock = await getFlock(port)
+
+    assert.equal(flock.source, 'demo')
+  }))
+}
+
+test('the server falls back to the practice flock when the gallery is offline', (testContext) => withWorkspace(async ({ directory, workspace }) => {
+  const port = await startServerWithGallery(testContext, { directory, workspace }, `http://127.0.0.1:${await findFreePort()}/gallery/booth`)
+
+  const flock = await getFlock(port)
+
+  assert.equal(flock.source, 'demo')
+}))
+
+test('the server answers 404 for a flock image the feed never named', (testContext) => withWorkspace(async ({ workspace }) => {
+  const port = await startBirdServer(testContext, workspace)
+
+  const response = await sendRequest({ port, requestPath: `/flock/images/${'0'.repeat(32)}.png` })
+
+  assert.equal(response.status, 404)
+}))
+
+const GALLERY_URL_SETTINGS = [
+  { behavior: 'prefers BOOTHSTRAP_GALLERY_URL', environment: { BOOTHSTRAP_GALLERY_URL: 'https://api.example/gallery/a', BIRDSBIRDBIRDS_GALLERY_URL: 'https://api.example/gallery/b' }, galleryUrl: 'https://api.example/gallery/a' },
+  { behavior: 'falls back to the event setting BIRDSBIRDBIRDS_GALLERY_URL', environment: { BIRDSBIRDBIRDS_GALLERY_URL: 'https://api.example/gallery/b' }, galleryUrl: 'https://api.example/gallery/b' },
+  { behavior: 'is undefined when neither is set', environment: {}, galleryUrl: undefined },
+]
+
+for (const { behavior, environment, galleryUrl } of GALLERY_URL_SETTINGS) {
+  test(`the gallery URL ${behavior}`, () => {
+    const url = galleryUrlFromEnvironment(environment)
+
+    assert.equal(url, galleryUrl)
+  })
+}
+
 /** Resolves a TCP port that was free a moment ago, by binding port 0 and closing. */
 const findFreePort = () => new Promise((resolve, reject) => {
   const probe = net.createServer()
@@ -765,13 +1131,13 @@ const startServerProcess = async (testContext, workspace) => {
   return port
 }
 
-test('the server answers 422 for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
+test('the server sends no flight for a named-pipe bird.json and keeps answering', (testContext) => withWorkspace(async ({ workspace }) => {
   const port = await startServerProcess(testContext, workspace)
   makeFifo(path.join(workspace, 'bird.json'))
 
-  const response = await sendRequest({ port, requestPath: '/bird.json', timeoutMs: 5000 })
+  const { flights } = await getFlights(port)
 
-  assert.equal(response.status, 422)
+  assert.equal(flights.current, null)
   assert.equal((await sendRequest({ port, requestPath: '/health', timeoutMs: 5000 })).status, 200)
 }))
 

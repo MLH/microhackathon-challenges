@@ -1,9 +1,11 @@
 # BirdsBirdBirds
 
-Draw a bird in the browser, tell Pi how it should fly, and watch it cross the
-sky. Pi writes the flight as a CSS keyframe animation in `bird.json`, and a
-checker lets only safe animations through to the page. The bird can then be
-published to the booth screens as a `birds-v1` gallery item.
+Draw a bird in the browser, describe how it should fly, and direct the
+flight by talking to Pi. Pi writes the flight as a CSS keyframe animation in
+`bird.json`, and a checker lets only safe animations through. The sky page
+draws each flight as a numbered path, then flies the bird along it, so the
+participant can point at waypoints ("add a loop at 3"). When they're happy,
+Pi publishes the bird to the booth screens as a `birds-v1` gallery item.
 
 ## Files
 
@@ -15,10 +17,14 @@ published to the booth screens as a `birds-v1` gallery item.
 | `extension.mjs` | Pi extension: tells Pi about each saved drawing (see below) |
 | `bird-watcher.mjs` | Watches the workspace for a new `bird.png` |
 | `check-bird.mjs` | Checks `bird.json`; `node check-bird.mjs [path]` |
+| `flight-path.mjs` | Turns a checked flight into waypoints on the gallery's stage |
+| `flight-history.mjs` | Records each new passing flight in `.flights/` |
+| `flock.mjs` | Fetches the booth flock for the sky, or falls back to the practice flock |
+| `flock/` | The practice flock: SVG birds and their flights in the feed's shape |
 | `server.mjs` | Local page server on `127.0.0.1:4322` |
 | `workspace-file.mjs` | Reads `bird.json` and `bird.png` only as capped regular files |
 | `setup`, `cleanup` | Start and stop the server (hooks in `hooks/`) |
-| `page/` | The drawing canvas and the sky |
+| `page/` | The drawing canvas and the display-only sky |
 
 There is no `install` hook: the package, extension included, has no
 dependencies beyond Node.
@@ -32,10 +38,108 @@ It starts a turn when Pi is idle and follows the current turn otherwise. The
 skill then reads the drawing and reports `draw-bird`, so nobody has to tell
 Pi they saved. A `bird.png` already in the workspace when Pi starts, and a
 save with the same content, send nothing. Pi writes `bird.json` and runs the
-checker itself, so `animate` needs no message.
+checker itself, so `animate` needs no message. Pi counts the files in
+`.flights/` (see Flight history) to report `direct-flight`, and reports
+`join-flock` once `publish_gallery_item` answers, without asking first: the
+participant can ask Pi to take the bird down, which it does with
+`withdraw_gallery_item`.
 
 The server listens on port 4322. Set `BIRDSBIRDBIRDS_PORT` to use another
 port, though the skill and the challenge expect 4322.
+
+## The page
+
+The page opens on the drawing canvas until a drawing is saved, and on the sky
+after. A save switches to the sky by itself. For a redraw, Pi opens
+`http://127.0.0.1:4322/?draw`, which shows the canvas again.
+
+The sky takes no input: the participant directs the flight by talking to Pi.
+It is the gallery's 1000 by 850 stage, scaled to fit the window, with each
+bird in the gallery's 120px box, flights slowed 3 times, and flock birds
+started 2.3 s apart, so the flight looks as it will on the booth screens.
+When a new flight arrives, its path draws itself on as a dotted line of
+straight segments, as CSS moves the bird between keyframes, then its numbered
+waypoints pop in, then the bird flies it. After a revision the previous path
+stays as a faint ghost, with the changed waypoints and the segments touching
+them highlighted. A chip names the bird and its origin.
+
+Drawings are often thin strokes in a corner of the canvas, so the page crops
+`bird.png` to its ink plus 6% padding before saving, and the sky crops every
+PNG it shows the same way, cached per URL, so birds published before that
+still fill their box. The participant's bird flies 1.6 times the size of a
+flock bird, centred on the same box so it stays on its path, with a white
+halo and above the path and markers; the flock is dimmed to 55% opacity.
+
+## Flight history
+
+While the page server runs, each `bird.json` that passes the checker and
+differs from the last recorded flight is copied to
+`<workspace>/.flights/NNN.json`, numbered from `001`. The server checks on
+any change in the workspace, debounced, and again whenever the page asks, so
+it never depends on what `fs.watch` reports.
+
+`GET /flight.json` answers `{ current, previous, changed }`. `current` and
+`previous` are the two latest recorded flights, or `null`:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | The flight's number in `.flights/` |
+| `bird_name`, `origin` | From `bird.json` |
+| `duration_s` | `animation.duration` in seconds, unslowed; the page plays it 3 times slower, as the gallery does |
+| `timing_function` | `animation.timing_function` |
+| `waypoints` | `{ n, offset, x, y }`, plus `rotate` (degrees), `scale`, `opacity`, and `easing` when set |
+
+Waypoints are numbered from 1, one per keyframe offset that sets a
+`transform`, in offset order. `x` and `y` are the bird box's top-left corner
+in pixels on the gallery's 1000 by 850 stage: 1vw is 10px and 1vh is 8.5px,
+as the gallery converts them, and a translate percentage is a share of the
+120px bird box. `changed` lists the current waypoints whose position or
+transform matches no waypoint of the previous flight, whatever its number,
+so inserting waypoints doesn't mark the unchanged ones after them.
+
+## The flock
+
+The other attendees' published birds fly dimmed behind the participant's.
+The page server reads the gallery's URL from `BOOTHSTRAP_GALLERY_URL`, or
+else from `BIRDSBIRDBIRDS_GALLERY_URL`, which an event can set in its
+`challenge_env`. It fetches `<url>/birds.json`:
+
+```json
+{
+  "items": [{
+    "id": "…", "bird_name": "…", "origin": "…", "display_name": "…",
+    "stored_at": "…", "image_url": "/gallery/{slug}/items/{id}/files/bird.png",
+    "keyframes": [{ "offset": 0, "transform": "translate(120px, 300px) rotate(5deg)", "opacity": 1, "easing": "ease-in" }],
+    "duration_s": 14, "timing_function": "ease-in-out"
+  }]
+}
+```
+
+`image_url` is a path on the gallery's origin, transforms are in stage
+pixels, and `duration_s` is the bird's own stated duration (2 to 60 s,
+unslowed); the page slows it 3 times at playback, as the gallery does. Each
+transform and timing function must pass the checker's grammar and is written
+out again; a bird that fails any check, or whose image is on another origin,
+is dropped. The booth API serves its files same-origin only, so the page
+server proxies the feed at `GET /flock.json` and each PNG at
+`GET /flock/images/<key>.png`, keeping copies in
+`$TMPDIR/birdsbirdbirds-flock/` and asking the gallery for the feed again
+after 30 s.
+
+With no URL, or when the gallery is offline, errs, answers 404, or sends no
+valid feed, `/flock.json` sends the practice flock in `flock/` instead, its
+SVGs served at `GET /flock/demo/<name>.svg`. Its `source` field is `live` or
+`demo`, and the page labels the flock to match.
+
+## Preview the page
+
+To see the sky open on a revision, with a ghost path and highlighted
+changes, seed a workspace with a sample drawing and two flights, then run the
+command the script prints, from the repository root:
+
+```sh
+node tools/seed-birds-workspace.mjs /tmp/bird-preview
+```
 
 ## Run without boothstrap
 
@@ -65,7 +169,7 @@ When done:
 ```
 
 `cleanup` stops the server and removes `.birdsbirdbirds/`; it leaves
-`bird.png` and `bird.json` alone. Without boothstrap there is no
+`bird.png`, `bird.json`, and `.flights/` alone. Without boothstrap there is no
 `report_step` or `publish_gallery_item`, so the skill names each finished
 step and skips the gallery.
 
@@ -96,15 +200,14 @@ need them.
 The `fly_` prefix keeps a bird's keyframes from colliding with CSS keywords
 or with the sky page's own `flap` keyframes.
 
-The keyframes alone place the bird. In the sky page the bird's wrapper sits
-at `top: 0; left: 0`, so `translate(x, y)` is measured from the top-left
-corner of the sky with no extra offset. A gallery renderer should place the
+The keyframes alone place the bird. In the sky page the bird's box sits at
+the top-left corner of the 1000 by 850 stage, so `translate(x, y)` is
+measured from there with no extra offset. A gallery renderer should place the
 bird the same way.
 
-Payloads come from `check-bird.mjs`, but a display should still load
-`css_keyframes` only as CSS text, as the sky page does with a constructed
-`CSSStyleSheet` (`replaceSync`), and set names with `textContent`, never as
-HTML.
+Payloads come from `check-bird.mjs`, but a display should still never insert
+`css_keyframes` as HTML, and should set names with `textContent`. The sky
+page takes neither: it gets waypoint numbers from `/flight.json`.
 
 ## What the checker allows
 
@@ -128,4 +231,7 @@ to 100%.
 - Rejected: `url(`, `@import`, a second at-rule, backslash escapes, quotes,
   `<`, comments, `!important`, unbalanced braces, text after the rule, and a
   name without the `fly_` prefix.
+- The flight starts and ends off screen: the first and last waypoints must
+  hold the whole bird box, turned and scaled, off the 1000 by 850 stage, so
+  the bird flies in and out of the sky.
 - The whole `bird.json` is at most 8192 bytes.
